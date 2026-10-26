@@ -1,0 +1,6 @@
+[project]
+name = "kegel"
+version = "1.0.0"
+description = "基于 LINUX DO OAuth 的每日站内积分打卡与 LDC 赞助入口（Python 标准库与 SQLite）"
+requires-python = ">=3.14"
+dependencies = []

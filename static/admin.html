@@ -1,0 +1,347 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex, nofollow" />
+    <title>管理后台 · 提肛打卡</title>
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/styles.css" />
+    <script src="/admin.js" defer></script>
+  </head>
+  <body class="stage-wrap">
+    <div id="loginPanel" class="page-wrap" style="max-width: 440px; margin-top: 10vh;">
+      <div class="card">
+        <h1 style="font-size: 24px; font-weight: 700; margin: 0 0 8px 0;">管理员验证</h1>
+        <p style="font-size: 13px; color: var(--text-muted); margin: 0 0 20px 0;">请输入在环境变量 ADMIN_TOKEN 配置的口令进入管理后台。</p>
+        <form id="loginForm">
+          <div class="form-group">
+            <label class="form-label" for="adminToken">管理员口令</label>
+            <input id="adminToken" class="input-text" type="password" required autofocus autocomplete="off" spellcheck="false" />
+          </div>
+          <p id="loginError" style="font-size: 13px; color: #dc2626; margin: 8px 0;" role="alert"></p>
+          <button class="btn-primary" type="submit" style="width: 100%;">进入管理后台 →</button>
+        </form>
+      </div>
+    </div>
+
+    <div id="dashboard" class="admin-shell" hidden>
+      <!-- Sidebar like Image 4 -->
+      <aside class="admin-sidebar">
+        <div class="admin-sidebar-brand">
+          <span>提肛小助手</span>
+          <span class="brand-badge" style="background:#e0f2fe; color:#0369a1; border-color:#bae6fd;">管理后台</span>
+        </div>
+        <nav class="admin-nav">
+          <a class="admin-nav-item active" href="#sec-overview">📊 概览监控</a>
+          <a class="admin-nav-item" href="#sec-rules">⚙️ 规则配置</a>
+          <a class="admin-nav-item" href="#sec-products">🎁 商品管理</a>
+          <a class="admin-nav-item" href="#sec-triggers">⏱️ 练习触发</a>
+          <a class="admin-nav-item" href="#sec-records">📜 奖励与用户</a>
+        </nav>
+        <div style="padding-top: 16px; border-top: 1px solid var(--border-light); display: flex; flex-direction: column; gap: 8px;">
+          <a class="btn-secondary" href="/" style="font-size: 13px;">返回首页</a>
+          <button id="logoutButton" class="btn-secondary" type="button" style="font-size: 13px; color: #dc2626;">退出管理</button>
+        </div>
+      </aside>
+
+      <!-- Main Content Area -->
+      <main class="admin-content">
+        <!-- Section Overview: Metrics Row like Image 4 -->
+        <section id="sec-overview" style="margin-bottom: 32px;">
+          <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 20px;">
+            <div>
+              <h1 style="font-size: 26px; font-weight: 800; margin: 0 0 6px 0;">管理后台</h1>
+              <p style="font-size: 13px; color: var(--text-muted); margin: 0;" id="adminDay">管理每日开放、积分规则、商品和用户数据，保障系统正常运行。</p>
+            </div>
+            <button id="refreshButton" class="btn-secondary" type="button">刷新全部数据</button>
+          </div>
+
+          <div class="metrics-row">
+            <div class="metric-card">
+              <span class="metric-label">今日开放状态</span>
+              <div id="openStatus" class="metric-val" style="color: var(--emerald);">--</div>
+              <div style="display: flex; justify-content: space-between; align-items: center;">
+                <span id="statusDetail" class="metric-sub">--</span>
+                <button id="openButton" class="btn-primary" type="button" style="padding: 6px 14px; font-size: 12px;">手动开启</button>
+              </div>
+            </div>
+
+            <div class="metric-card">
+              <span class="metric-label">最晚开启时间</span>
+              <div id="metricDeadline" class="metric-val">22:00</div>
+              <span class="metric-sub">每日超过该时间将自动开放</span>
+            </div>
+
+            <div class="metric-card">
+              <span class="metric-label">每组时长</span>
+              <div id="metricStepSeconds" class="metric-val">8 秒</div>
+              <span class="metric-sub">每组练习需满足的最短时间</span>
+            </div>
+
+            <div class="metric-card">
+              <span class="metric-label">全站每日积分额度</span>
+              <div id="metricQuota" class="metric-val">800 分</div>
+              <span id="metricQuotaSub" class="metric-sub">每日发放上限</span>
+            </div>
+          </div>
+        </section>
+
+        <!-- Section Rules Config -->
+        <section id="sec-rules" style="margin-bottom: 36px;">
+          <h2 style="font-size: 20px; font-weight: 700; margin: 0 0 16px 0;">规则配置</h2>
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 20px;">
+            <!-- Settings Form -->
+            <div class="card">
+              <h3 style="font-size: 16px; font-weight: 700; margin: 0 0 16px 0;">基础参数设置</h3>
+              <form id="settingsForm">
+                <div class="form-group">
+                  <label class="form-label" for="deadline">最晚开放时间 (HH:MM)</label>
+                  <input id="deadline" class="input-text" type="time" required />
+                </div>
+                <div class="form-group">
+                  <label class="form-label" for="minStepSeconds">每组最短秒数 (1-300)</label>
+                  <input id="minStepSeconds" class="input-text" type="number" min="1" max="300" required />
+                </div>
+                <div class="form-group">
+                  <label class="form-label" for="dailyPointsLimit">全站每日积分总额度</label>
+                  <input id="dailyPointsLimit" class="input-text" type="number" min="0" max="100000000" required />
+                  <p id="dailyQuotaStatus" style="font-size: 12px; color: var(--text-dim); margin: 4px 0 0 0;"></p>
+                </div>
+                <div class="form-group">
+                  <label class="form-label" for="conditionUrl">提前开启条件 URL (可选)</label>
+                  <input id="conditionUrl" class="input-text" type="url" placeholder="https://example.com/checkin-condition" />
+                  <p style="font-size: 12px; color: var(--text-dim); margin: 4px 0 0 0;">返回 {"open": true} 时自动提前开放今日打卡。</p>
+                </div>
+                <button class="btn-primary" type="submit" style="width: 100%;">保存基础规则</button>
+              </form>
+            </div>
+
+            <!-- Rewards Form -->
+            <div class="card">
+              <h3 style="font-size: 16px; font-weight: 700; margin: 0 0 8px 0;">排名奖励配置</h3>
+              <p style="font-size: 12px; color: var(--text-muted); margin: 0 0 16px 0;">按截止名次递增，未覆盖名次无奖励。</p>
+              <form id="rewardsForm">
+                <table class="data-table" style="margin-bottom: 16px;">
+                  <thead>
+                    <tr>
+                      <th>截止名次</th>
+                      <th>奖励积分</th>
+                      <th>操作</th>
+                    </tr>
+                  </thead>
+                  <tbody id="rewardRows"></tbody>
+                </table>
+                <div style="display: flex; gap: 10px;">
+                  <button id="addTierButton" class="btn-secondary" type="button" style="flex: 1;">添加档位</button>
+                  <button class="btn-primary" type="submit" style="flex: 1;">保存奖励设置</button>
+                </div>
+              </form>
+            </div>
+
+            <!-- Visits & Review -->
+            <div class="card">
+              <h3 style="font-size: 16px; font-weight: 700; margin: 0 0 8px 0;">访问频率与异常审核</h3>
+              <p style="font-size: 12px; color: var(--text-muted); margin: 0 0 16px 0;">周期性定时访问等模式会被自动标记，需人工确认。</p>
+              <div class="table-wrap">
+                <table class="data-table">
+                  <thead>
+                    <tr>
+                      <th>用户</th>
+                      <th>次数</th>
+                      <th>原因</th>
+                      <th>操作</th>
+                    </tr>
+                  </thead>
+                  <tbody id="visitRows"></tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Section Products Management (New per requirement!) -->
+        <section id="sec-products" style="margin-bottom: 36px;">
+          <h2 style="font-size: 20px; font-weight: 700; margin: 0 0 16px 0;">商品管理</h2>
+          <div style="display: grid; grid-template-columns: 360px 1fr; gap: 20px;">
+            <!-- Product Form -->
+            <div class="card">
+              <h3 id="productFormTitle" style="font-size: 16px; font-weight: 700; margin: 0 0 16px 0;">添加上架商品</h3>
+              <form id="productsForm">
+                <input id="productId" type="hidden" />
+                <div class="form-group">
+                  <label class="form-label" for="productCategory">选择品类</label>
+                  <select id="productCategory" class="input-select">
+                    <option value="LDC" selected>LDC 自动发货</option>
+                  </select>
+                </div>
+                <div class="form-group">
+                  <label class="form-label" for="productName">商品名称</label>
+                  <input id="productName" class="input-text" type="text" maxlength="80" required placeholder="例如：1.00 LDC 积分兑换" />
+                </div>
+                <div class="form-group">
+                  <label class="form-label" for="productDescription">商品介绍</label>
+                  <textarea id="productDescription" class="input-textarea" rows="2" maxlength="500" placeholder="购买后通过 Credit 接口自动发货到用户的 Linux DO 账户"></textarea>
+                </div>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+                  <div class="form-group">
+                    <label class="form-label" for="productPrice">积分售价</label>
+                    <input id="productPrice" class="input-text" type="number" min="0" max="100000000" step="1" required value="500" />
+                  </div>
+                  <div class="form-group">
+                    <label class="form-label" for="productLdcAmount">LDC 发货数量</label>
+                    <input id="productLdcAmount" class="input-text" type="number" min="0.01" max="10000" step="0.01" required value="1.00" />
+                  </div>
+                </div>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+                  <div class="form-group">
+                    <label class="form-label" for="productUserLimit">单人每日限购</label>
+                    <input id="productUserLimit" class="input-text" type="number" min="0" max="100000" step="1" value="1" placeholder="0为不限" />
+                  </div>
+                  <div class="form-group">
+                    <label class="form-label" for="productTotalLimit">全站总数限购</label>
+                    <input id="productTotalLimit" class="input-text" type="number" min="0" max="100000" step="1" value="10" placeholder="0为不限" />
+                  </div>
+                </div>
+                <div class="form-group" style="display: flex; align-items: center; gap: 8px;">
+                  <input id="productActive" type="checkbox" checked />
+                  <label for="productActive" style="font-size: 14px; font-weight: 500;">立即上架在商店展示</label>
+                </div>
+                <div style="display: flex; gap: 10px;">
+                  <button id="productSave" class="btn-primary" type="submit" style="flex: 1;">保存商品</button>
+                  <button id="productReset" class="btn-secondary" type="button">重置</button>
+                </div>
+              </form>
+            </div>
+
+            <!-- Products List Table & Purchases -->
+            <div>
+              <div class="card" style="margin-bottom: 24px;">
+                <h3 style="font-size: 16px; font-weight: 700; margin: 0 0 16px 0;">商品列表 (LDC 品类)</h3>
+                <div class="table-wrap">
+                  <table class="data-table">
+                    <thead>
+                      <tr>
+                        <th>ID</th>
+                        <th>品类</th>
+                        <th>名称</th>
+                        <th>售价</th>
+                        <th>发货数量</th>
+                        <th>每日限购</th>
+                        <th>状态</th>
+                        <th>操作</th>
+                      </tr>
+                    </thead>
+                    <tbody id="productRows"></tbody>
+                  </table>
+                </div>
+              </div>
+
+              <div class="card">
+                <h3 style="font-size: 16px; font-weight: 700; margin: 0 0 8px 0;">自动发货与兑换记录</h3>
+                <p style="font-size: 12px; color: var(--text-muted); margin: 0 0 16px 0;">用户积分购买商品后的实时发货流水状态。</p>
+                <div class="table-wrap" style="max-height: 420px; overflow-y: auto;">
+                  <table class="data-table">
+                    <thead>
+                      <tr>
+                        <th>订单号</th>
+                        <th>用户</th>
+                        <th>商品 / LDC</th>
+                        <th>消耗积分</th>
+                        <th>发货状态</th>
+                        <th>单号 / 错误</th>
+                        <th>时间</th>
+                      </tr>
+                    </thead>
+                    <tbody id="purchaseRows"></tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Section Practice Triggers -->
+        <section id="sec-triggers" style="margin-bottom: 36px;">
+          <h2 style="font-size: 20px; font-weight: 700; margin: 0 0 16px 0;">每组练习的触发时间记录</h2>
+          <div class="card">
+            <div class="table-wrap">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>用户</th>
+                    <th>组次</th>
+                    <th>触发时间</th>
+                    <th>本轮标识</th>
+                  </tr>
+                </thead>
+                <tbody id="practiceRows"></tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        <!-- Section Records: Rewards & User Wallets -->
+        <section id="sec-records" style="margin-bottom: 40px;">
+          <h2 style="font-size: 20px; font-weight: 700; margin: 0 0 16px 0;">记录查询</h2>
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+            <!-- Rewards History -->
+            <div class="card">
+              <h3 style="font-size: 16px; font-weight: 700; margin: 0 0 16px 0;">每日奖励领取记录</h3>
+              <div class="table-wrap" style="max-height: 480px; overflow-y: auto;">
+                <table class="data-table">
+                  <thead>
+                    <tr>
+                      <th>日期 / 排名</th>
+                      <th>用户</th>
+                      <th>积分</th>
+                      <th>领取状态</th>
+                      <th>领取时间</th>
+                    </tr>
+                  </thead>
+                  <tbody id="rewardHistoryRows"></tbody>
+                </table>
+              </div>
+            </div>
+
+            <!-- User Wallets -->
+            <div class="card">
+              <h3 style="font-size: 16px; font-weight: 700; margin: 0 0 16px 0;">用户积分余额</h3>
+              <div class="table-wrap" style="max-height: 480px; overflow-y: auto;">
+                <table class="data-table">
+                  <thead>
+                    <tr>
+                      <th>用户</th>
+                      <th>站内积分余额</th>
+                    </tr>
+                  </thead>
+                  <tbody id="walletRows"></tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <!-- Confirm Modal -->
+    <dialog id="confirmationDialog" class="dialog-modal">
+      <form id="confirmationForm">
+        <h2 id="confirmationTitle" style="font-size: 18px; font-weight: 700; margin: 0 0 8px 0;"></h2>
+        <p id="confirmationDescription" style="font-size: 14px; color: var(--text-muted); margin: 0 0 20px 0;"></p>
+        <div style="margin-bottom: 20px;">
+          <label style="display: flex; align-items: center; gap: 8px; font-size: 13px;">
+            <input id="confirmed" type="checkbox" required />
+            <span id="confirmationCheckText">我确认执行此操作。</span>
+          </label>
+        </div>
+        <div style="display: flex; gap: 12px; justify-content: flex-end;">
+          <button id="cancelConfirmation" class="btn-secondary" type="button">取消</button>
+          <button id="confirmButton" class="btn-primary" type="submit">确认执行</button>
+        </div>
+      </form>
+    </dialog>
+
+    <div id="notice" class="toast-notice" role="status" aria-live="polite" hidden></div>
+  </body>
+</html>

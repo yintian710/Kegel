@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#f8fafc" />
+    <meta name="description" content="每天三组，给自己一点向上的力量。LINUX DO 每日提肛打卡。" />
+    <title>你今天提肛了吗？</title>
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/styles.css" />
+    <script src="/app.js" defer></script>
+  </head>
+  <body class="stage-wrap" data-step="0">
+    <header id="topbar" class="site-header" hidden>
+      <a class="site-brand" href="/" data-interactive>
+        <span>提肛打卡</span>
+        <span class="brand-badge">DAILY</span>
+      </a>
+      <nav class="site-nav">
+        <a class="nav-link active" href="/" data-interactive>首页</a>
+        <a id="walletLink" class="nav-link" href="/shop" data-interactive>商店</a>
+        <a class="nav-link" href="/donate" data-interactive>赞助</a>
+        <a class="nav-link" href="/admin" data-interactive>管理</a>
+        <button id="accountButton" class="user-btn" type="button" data-interactive>LINUX DO 登录</button>
+      </nav>
+    </header>
+
+    <main id="stage" class="stage-main" tabindex="0" role="button" aria-label="开始今日提肛练习">
+      <div id="stageContent" class="stage-content">
+        <!-- Landing / active practice prompt -->
+        <div id="promptWrap">
+          <p id="stageLabel" class="brand-badge" style="display:inline-block; margin-bottom: 24px;" hidden></p>
+          <h1 id="prompt" class="landing-prompt" aria-live="polite" aria-atomic="true">你今天<span class="prompt-accent">提肛</span>了吗？</h1>
+          <p id="stageHint" class="landing-sub">点击任意位置开始</p>
+          <div id="progress" class="dots-progress" aria-label="练习进度" hidden>
+            <span></span><span></span><span></span>
+          </div>
+        </div>
+
+        <!-- Completed view (Image 2) -->
+        <section id="result" class="completion-container" data-interactive hidden>
+          <div class="completion-card">
+            <div class="completion-check-wrap">
+              <div class="check-aura"></div>
+              <div class="check-circle">
+                <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" />
+                </svg>
+              </div>
+            </div>
+            <div class="completion-info">
+              <h2 id="completionTitle" class="completion-title">今日第 <span id="rankNumber" class="rank-num">--</span> 位</h2>
+              <p id="rewardLabel" class="completion-reward-text">本次奖励 <b id="rewardAmount">--</b> 站内积分</p>
+              <div class="completion-actions">
+                <button id="claimButton" class="btn-primary" type="button">领取站内积分</button>
+                <span id="statusPill" class="status-pill" hidden></span>
+              </div>
+              <p id="rewardNote" class="status-copy" style="font-size: 13px; color: var(--text-muted); margin-top: 10px;" aria-live="polite"></p>
+            </div>
+          </div>
+
+          <div class="completion-grid">
+            <!-- Left: Leaderboard -->
+            <div class="card">
+              <div class="card-header-line">
+                <h3 class="card-title">今日榜单 <span class="card-subtitle">坚持打卡，赢取更多奖励</span></h3>
+                <span id="leaderboardTotal" style="font-size: 12px; color: var(--text-dim);"></span>
+              </div>
+              <table class="rank-table">
+                <thead>
+                  <tr>
+                    <th>名次</th>
+                    <th>用户名</th>
+                    <th>奖励积分</th>
+                  </tr>
+                </thead>
+                <tbody id="leaderboardList"></tbody>
+              </table>
+            </div>
+
+            <!-- Right: Rules & Quota -->
+            <div class="card">
+              <div class="card-header-line">
+                <h3 class="card-title">奖励规则 <span class="card-subtitle">根据今日打卡名次获得对应站内积分</span></h3>
+              </div>
+              <ul id="rewardRules" class="rules-list"></ul>
+
+              <div class="quota-box">
+                <div class="card-header-line" style="margin-bottom: 10px;">
+                  <h4 class="card-title" style="font-size: 15px;">今日额度 <span class="card-subtitle">每日奖励总额度有限，先到先得</span></h4>
+                </div>
+                <div class="quota-labels">
+                  <span id="quotaUsedText">每日已用 0 / 800</span>
+                  <span id="quotaRemainingText" style="color: var(--primary); font-weight: 600;">剩余 800</span>
+                </div>
+                <div class="quota-bar-track">
+                  <div id="quotaBarFill" class="quota-bar-fill" style="width: 0%"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+      </div>
+    </main>
+
+    <footer id="footer" style="padding: 24px; text-align: center; font-size: 12px; color: var(--text-dim);" hidden>
+      <span id="openingNote"></span> · <span>慢一点，也向上一点。</span>
+    </footer>
+
+    <div id="notice" class="toast-notice" role="status" aria-live="polite" hidden></div>
+  </body>
+</html>

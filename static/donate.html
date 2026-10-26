@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#f8fafc" />
+    <meta name="description" content="通过 LINUX DO Credit 赞助本站，查看已确认的 LDC 赞助榜。" />
+    <title>LDC 赞助 · 向上</title>
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/styles.css" />
+    <script src="/donate.js" defer></script>
+  </head>
+  <body>
+    <header class="site-header">
+      <a class="site-brand" href="/">
+        <span>提肛打卡</span>
+        <span class="brand-badge">DAILY</span>
+      </a>
+      <nav class="site-nav">
+        <a class="nav-link" href="/">首页</a>
+        <a class="nav-link" href="/shop">商店</a>
+        <a class="nav-link active" href="/donate">赞助</a>
+        <a class="nav-link" href="/admin">管理</a>
+        <button id="accountButton" class="user-btn" type="button" disabled>正在加载账户…</button>
+      </nav>
+    </header>
+
+    <main class="page-wrap" id="donateMain">
+      <div class="page-hero">
+        <h1>LDC 赞助与感谢</h1>
+        <p>感谢每一份支持本站运行与持续改进的社区力量。</p>
+      </div>
+
+      <div class="shop-columns">
+        <!-- Left: Sponsor action & My records -->
+        <div>
+          <!-- Donation Action Card -->
+          <div class="card" style="margin-bottom: 24px;">
+            <div class="card-header-line">
+              <h2 class="card-title">支持本站</h2>
+              <span id="donateStatusBadge" class="card-subtitle"></span>
+            </div>
+            <p style="font-size: 14px; color: var(--text-muted); line-height: 1.6; margin-top: 0;">
+              如果你喜欢提肛打卡，并希望它能稳定持续发展，欢迎通过 LINUX DO Credit 赞助支持我们。你的赞助将用于服务器日常运行。
+            </p>
+
+            <form id="donationForm">
+              <label class="form-label" for="donationAmount">赞助金额 (LDC)</label>
+              <div style="display: flex; gap: 12px; align-items: center;">
+                <input id="donationAmount" class="input-text" type="number" min="0.01" max="10000" step="0.01" value="10.00" inputmode="decimal" required style="font-size: 18px; font-weight: 700; max-width: 200px;" />
+                <button id="sponsorSubmitBtn" class="btn-primary" type="submit">赞助 LDC →</button>
+              </div>
+
+              <!-- Quick chips -->
+              <div class="amount-chips">
+                <button type="button" class="amount-chip" data-amount="1.00">1 LDC</button>
+                <button type="button" class="amount-chip" data-amount="5.00">5 LDC</button>
+                <button type="button" class="amount-chip selected" data-amount="10.00">10 LDC</button>
+                <button type="button" class="amount-chip" data-amount="50.00">50 LDC</button>
+                <button type="button" class="amount-chip" data-amount="100.00">100 LDC</button>
+              </div>
+
+              <div class="notice-box">
+                <span style="font-size: 18px;">💡</span>
+                <div>
+                  <strong>赞助不会增加站内积分</strong><br />
+                  赞助是对本站志愿维护的支持行为，不会增加任何站内积分，也不影响每日打卡奖励。
+                </div>
+              </div>
+            </form>
+          </div>
+
+          <!-- My donations list -->
+          <div class="card">
+            <div class="card-header-line">
+              <h2 class="card-title">我的赞助记录</h2>
+              <span id="myOrdersNote" class="card-subtitle">登录后查看个人赞助订单</span>
+            </div>
+            <div class="table-wrap">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>时间</th>
+                    <th>赞助金额</th>
+                    <th>状态</th>
+                    <th>订单号</th>
+                  </tr>
+                </thead>
+                <tbody id="myDonationsRows">
+                  <tr>
+                    <td colspan="4" style="text-align: center; color: var(--text-dim); padding: 24px;">登录后可查看自己的赞助记录</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <!-- Right: Public Leaderboard -->
+        <div>
+          <div class="card">
+            <div class="card-header-line">
+              <div>
+                <h2 class="card-title">LDC 赞助榜</h2>
+                <span class="card-subtitle">按已确认到账的 LDC 总额排序，仅包含核验记录</span>
+              </div>
+              <button id="refreshBoardBtn" class="btn-secondary" type="button" style="padding: 6px 14px; font-size: 12px;">刷新榜单</button>
+            </div>
+
+            <div class="table-wrap">
+              <table class="rank-table">
+                <thead>
+                  <tr>
+                    <th>排名</th>
+                    <th>用户名</th>
+                    <th>赞助总额</th>
+                    <th>次数</th>
+                  </tr>
+                </thead>
+                <tbody id="donationBoardRows">
+                  <tr>
+                    <td colspan="4" style="text-align: center; color: var(--text-dim); padding: 32px;">正在读取赞助榜…</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+    </main>
+
+    <div id="notice" class="toast-notice" role="status" aria-live="polite" hidden></div>
+  </body>
+</html>

@@ -1,0 +1,509 @@
+import concurrent.futures
+import http.client
+import hashlib
+import json
+import os
+import tempfile
+import threading
+import unittest
+import urllib.parse
+from pathlib import Path
+import credits
+from unittest.mock import patch
+
+import app
+
+
+class QuietHandler(app.AppHandler):
+    def log_message(self, *_args):
+        pass
+
+
+class CheckinBehavior(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.server = app.CheckinServer(("127.0.0.1", 0), QuietHandler)
+        cls.worker = threading.Thread(target=cls.server.serve_forever, daemon=True)
+        cls.worker.start()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.server.shutdown()
+        cls.server.server_close()
+        cls.worker.join()
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.config = patch.multiple(app, DB_PATH=Path(self.temp.name) / "test.db", ADMIN_TOKEN="test-admin", TRIGGER_TOKEN="test-trigger")
+        self.config.start()
+        self.addCleanup(self.config.stop)
+        self.environment = patch.dict(os.environ, {"LDC_DONATION_ENABLED": "false", "LDC_CLIENT_ID": "", "LDC_CLIENT_SECRET": ""})
+        self.environment.start()
+        self.addCleanup(self.environment.stop)
+        app.init_db()
+        self.now = 1792972800.0  # Asia/Shanghai 2026-10-26 08:00.
+        self.clock = patch.object(app.time, "time", return_value=self.now)
+        self.clock.start()
+        self.addCleanup(self.clock.stop)
+        self.request("/api/admin/settings", {"deadline": "22:00", "min_step_seconds": 1, "daily_points_limit": 100000000}, admin=True)
+
+    def request(self, path, body=None, user=None, admin=False, headers=None):
+        request_headers = {"Content-Type": "application/json"}
+        if user is not None:
+            token = app.sign_payload({"purpose": "session", "id": str(user), "username": f"user{user}", "exp": self.now + 86400 * 7})
+            request_headers["Cookie"] = f"linuxdo_session={token}"
+        if admin:
+            request_headers["X-Admin-Token"] = "test-admin"
+        request_headers.update(headers or {})
+        connection = http.client.HTTPConnection(*self.server.server_address, timeout=10)
+        try:
+            connection.request("GET" if body is None else "POST", path, body=json.dumps(body) if body is not None else None, headers=request_headers)
+            response = connection.getresponse()
+            body = response.read()
+            return response.status, json.loads(body) if response.getheader("Content-Type", "").startswith("application/json") else body.decode()
+        finally:
+            connection.close()
+
+    def open(self):
+        code, _ = self.request("/api/admin/open", {}, admin=True)
+        self.assertEqual(code, 200)
+
+    def prepare(self, user):
+        code, result = self.request("/api/session/start", {}, user=user)
+        self.assertEqual(code, 200, result)
+        session = result["session"]
+        while session["step"] < 2:
+            app.time.time.return_value = app.time.time() + 2
+            code, result = self.request("/api/session/step", {"token": session["token"]}, user=user)
+            self.assertEqual(code, 200, result)
+            session = result["session"]
+        return session
+
+    def complete(self, user):
+        session = self.prepare(user)
+        if session["step"] == 3:
+            return self.request("/api/status", user=user)[1]["entry"]
+        app.time.time.return_value = app.time.time() + 2
+        code, result = self.request("/api/session/complete", {"token": session["token"]}, user=user)
+        self.assertEqual(code, 200, result)
+        return result["entry"]
+
+    def test_auth_closed_admin_and_trigger_guards(self):
+        self.assertEqual(self.request("/api/admin")[0], 401)
+        self.assertEqual(self.request("/api/admin/open", {})[0], 401)
+        self.assertFalse(self.request("/api/session/start", {})[1]["session"]["eligible"])
+        self.assertFalse(self.request("/api/session/start", {}, user=1)[1]["session"]["eligible"])
+        self.assertEqual(self.request("/api/claim", {})[0], 401)
+        self.assertEqual(self.request("/api/trigger/open", {})[0], 401)
+        self.assertEqual(self.request("/api/trigger/open", {}, headers={"X-Trigger-Token": "test-trigger"})[0], 200)
+        _, state = self.request("/api/status")
+        self.assertTrue(state["is_open"])
+        self.assertEqual(state["open_reason"], "trigger")
+        with patch.object(app, "ADMIN_TOKEN", ""):
+            self.assertEqual(self.request("/api/admin", admin=True)[0], 401)
+        self.assertEqual(self.request("/api/admin/open", {}, admin=True, headers={"Origin": "https://other.example"})[0], 403)
+
+    def test_timing_token_replay_and_daily_uniqueness(self):
+        self.open()
+        _, result = self.request("/api/session/start", {}, user=1)
+        old_token = result["session"]["token"]
+        self.assertEqual(self.request("/api/session/step", {"token": old_token}, user=1)[0], 429)
+        entry = self.complete(1)
+        self.assertEqual(entry["rank"], 1)
+        self.assertEqual(self.request("/api/session/step", {"token": old_token}, user=1)[0], 409)
+        again = self.complete(1)
+        self.assertEqual(again["rank"], 1)
+        state = self.request("/api/status", user=1)[1]
+        self.assertEqual((state["total"], state["wallet"]["balance"]), (1, 0))
+        _, result = self.request("/api/claim", {"amount": 99999999}, user=1)
+        self.assertEqual(result["entry"]["reward_status"], "credited")
+        self.assertEqual(result["wallet"]["balance"], 1000)
+        self.assertEqual(self.request("/api/claim", {}, user=1)[1]["wallet"]["balance"], 1000)
+
+    def test_reward_boundaries_and_configuration_snapshot(self):
+        self.open()
+        for prior, expected in [(9, 1000), (19, 500), (49, 100), (50, 0)]:
+            with self.subTest(rank=prior + 1):
+                with app.db() as connection:
+                    connection.execute("DELETE FROM entries")
+                    connection.execute("DELETE FROM sessions")
+                    for rank in range(1, prior + 1):
+                        connection.execute("INSERT INTO entries(day,user_id,username,rank,amount,completed_at,reward_status) VALUES (?,?,?,?,?,?,?)", (app.day_key(), str(rank), f"user{rank}", rank, 1000, self.now, "unclaimed"))
+                entry = self.complete(999)
+                self.assertEqual((entry["rank"], entry["amount"]), (prior + 1, expected))
+        self.request("/api/admin/settings", {"reward_tiers": [{"through": 100, "amount": 3000}]}, admin=True)
+        self.assertEqual(self.request("/api/status", user=999)[1]["entry"]["amount"], 0)
+        self.assertEqual(self.request("/api/claim", {}, user=999)[1]["entry"]["reward_status"], "none")
+        self.assertEqual(self.request("/api/shop", user=999)[1]["wallet"]["balance"], 0)
+
+    def test_concurrent_completions_have_distinct_ranks(self):
+        self.open()
+        tokens = {user: self.prepare(user)["token"] for user in range(1, 7)}
+        app.time.time.return_value = app.time.time() + 2
+        def finish(user):
+            code, result = self.request("/api/session/complete", {"token": tokens[user]}, user=user)
+            self.assertEqual(code, 200, result)
+            return result["entry"]["rank"]
+        with concurrent.futures.ThreadPoolExecutor(max_workers=6) as pool:
+            ranks = list(pool.map(finish, tokens))
+        self.assertEqual(sorted(ranks), [1, 2, 3, 4, 5, 6])
+
+    def test_concurrent_claims_credit_wallet_and_ledger_once(self):
+        self.open()
+        self.complete(7)
+        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
+            results = list(pool.map(lambda _: self.request("/api/claim", {}, user=7), range(8)))
+        self.assertTrue(all(code == 200 and value["wallet"]["balance"] == 1000 for code, value in results))
+        shop = self.request("/api/shop", user=7)[1]
+        self.assertEqual(shop["wallet"]["balance"], 1000)
+        self.assertEqual([(item["delta"], item["balance_after"]) for item in shop["ledger"]], [(1000, 1000)])
+        self.assertEqual(self.request("/api/shop", user=8)[1]["ledger"], [])
+        self.assertIsNone(self.request("/api/shop")[1]["wallet"])
+
+    def test_ledger_failure_rolls_back_wallet_and_claim(self):
+        self.open()
+        self.complete(1)
+        with app.db() as connection:
+            connection.execute("CREATE TRIGGER fail_ledger BEFORE INSERT ON points_ledger BEGIN SELECT RAISE(ABORT,'forced storage failure'); END")
+        self.assertEqual(self.request("/api/claim", {}, user=1)[0], 500)
+        state = self.request("/api/status", user=1)[1]
+        self.assertEqual((state["wallet"]["balance"], state["entry"]["reward_status"]), (0, "unclaimed"))
+        self.assertEqual(self.request("/api/shop", user=1)[1]["ledger"], [])
+        with app.db() as connection:
+            connection.execute("DROP TRIGGER fail_ledger")
+        self.assertEqual(self.request("/api/claim", {}, user=1)[1]["wallet"]["balance"], 1000)
+
+    def test_verified_donations_rank_once_without_crediting_points(self):
+        with patch.dict(os.environ, {"LDC_DONATION_ENABLED": "true", "LDC_CLIENT_ID": "merchant", "LDC_CLIENT_SECRET": "test-secret"}):
+            code, created = self.request("/api/donations/create", {"amount": "3.00"}, user=1)
+            self.assertEqual(code, 200, created)
+            order = created["order"]
+            for _ in range(2):
+                code, state = self.request(f"/api/donations?donation={order['order_no']}&paid=1", user=1)
+                shop = self.request("/api/shop", user=1)[1]
+                self.assertEqual((shop["wallet"]["balance"], shop["ledger"], state["donation_leaderboard"]), (0, [], []))
+            fields = created["payment"]["fields"]
+            notify = {key: fields[key] for key in ["pid", "type", "out_trade_no", "name", "money"]}
+            notify.update({"trade_no": "HTTP-TRADE-1", "trade_status": "TRADE_SUCCESS"})
+            payload = "&".join(f"{key}={value}" for key, value in sorted(notify.items())) + "test-secret"
+            notify["sign"] = hashlib.md5(payload.encode()).hexdigest()
+            url = "/payments/ldc/notify?" + urllib.parse.urlencode(notify)
+            for _ in range(2):
+                self.assertEqual(self.request(url), (200, "success"))
+            self.assertEqual(self.request(url + "&money=3.00"), (400, "fail"))
+            state = self.request("/api/donations", user=1)[1]
+            self.assertEqual(state["donation_leaderboard"][0], {"rank": 1, "username": "user1", "amount": "3.00", "count": 1})
+            shop = self.request("/api/shop", user=1)[1]
+            self.assertEqual((shop["wallet"]["balance"], shop["ledger"]), (0, []))
+            self.assertEqual(self.request("/api/donations", user=2)[1]["donation_orders"], [])
+        self.assertEqual(self.request("/api/claim", {}, user=1)[0], 409)
+
+    def test_periodic_visits_require_review_then_approval(self):
+        self.open()
+        with app.db() as connection:
+            for i in range(5, 0, -1):
+                app.record_visit(connection, "1", "user1", "visitor", "127.0.0.1", "visit", self.now - i * 60)
+        code, result = self.request("/api/visit", {}, user=1)
+        self.assertEqual(code, 200)
+        self.assertIn("固定周期", result["review"]["reason"])
+        self.assertFalse(self.request("/api/session/start", {}, user=1)[1]["session"]["eligible"])
+        self.assertEqual(self.request("/api/admin/review", {"user_id": "1", "approved": True}, admin=True)[0], 200)
+        self.assertEqual(self.request("/api/session/start", {}, user=1)[0], 200)
+        visits = self.request("/api/admin", admin=True)[1]["visits"]
+        self.assertEqual(visits[0]["user_id"], "1")
+        self.assertGreaterEqual(visits[0]["count"], 8)
+
+    def test_deadline_rollover_preserves_wallet_but_resets_rank(self):
+        with app.db() as connection:
+            before = app.ensure_day(connection, self.now)
+            self.assertIsNone(before["opened_at"])
+            deadline = app.datetime.fromisoformat(before["day"] + "T22:00:00+08:00").timestamp()
+            self.assertEqual(app.ensure_day(connection, deadline)["open_reason"], "deadline")
+        self.complete(1)
+        self.request("/api/claim", {}, user=1)
+        old = self.request("/api/status", user=1)[1]
+        with patch.object(app.time, "time", return_value=self.now + 86400):
+            fresh = self.request("/api/status", user=1)[1]
+            self.assertNotEqual(old["day"], fresh["day"])
+            self.assertEqual((fresh["total"], fresh["wallet"]["balance"]), (0, 1000))
+            self.assertIsNone(fresh["entry"])
+            self.assertFalse(fresh["is_open"])
+            self.assertEqual(fresh["quota"]["used"], 0)
+            self.assertEqual(fresh["quota"]["remaining"], fresh["quota"]["limit"])
+            self.assertEqual(self.request("/api/session/step", {"token": old["session"]["token"]}, user=1)[0], 409)
+            self.open()
+            self.complete(1)
+            self.assertEqual(self.request("/api/claim", {}, user=1)[1]["wallet"]["balance"], 2000)
+        self.assertEqual([item["balance_after"] for item in self.request("/api/shop", user=1)[1]["ledger"]], [2000, 1000])
+        app.init_db()
+        self.assertEqual(self.request("/api/shop", user=1)[1]["wallet"]["balance"], 2000)
+
+    def test_invalid_rewards_are_rejected_without_partial_save(self):
+        for amount in ["NaN", "Infinity", -1, 0.5, True, 100000001]:
+            code, _ = self.request("/api/admin/settings", {"deadline": "21:00", "reward_tiers": [{"through": 10, "amount": amount}]}, admin=True)
+            self.assertEqual(code, 400)
+        self.assertEqual(self.request("/api/admin", admin=True)[1]["settings"]["deadline"], "22:00")
+        self.assertEqual(self.request("/api/admin/settings", {"min_step_seconds": 0}, admin=True)[0], 400)
+        self.assertEqual(self.request("/api/admin/settings", {"condition_url": "file:///etc/passwd"}, admin=True)[0], 400)
+        for limit in [-1, 0.5, True, 100000001]:
+            self.assertEqual(self.request("/api/admin/settings", {"daily_points_limit": limit}, admin=True)[0], 400)
+
+    def test_condition_scheduler_opens_only_for_true_condition(self):
+        self.request("/api/admin/settings", {"condition_url": "http://condition.example/open"}, admin=True)
+        for response in [{"open": "true"}, {"open": True}]:
+            stop = threading.Event()
+            def condition(*args, **kwargs):
+                stop.set()
+                return response
+            with patch.object(app, "json_request", side_effect=condition):
+                app.scheduler(stop)
+            self.assertEqual(self.request("/api/status")[1]["is_open"], response["open"] is True)
+
+    def test_oversize_reward_rejected_whole_and_admin_can_raise_limit(self):
+        self.request("/api/admin/settings", {"daily_points_limit": 800}, admin=True)
+        self.open()
+        self.complete(1)
+        code, result = self.request("/api/claim", {}, user=1)
+        self.assertEqual(code, 409)
+        self.assertIn("不支持拆分", result["error"])
+        state = self.request("/api/status", user=1)[1]
+        self.assertEqual(state["quota"], {"limit": 800, "used": 0, "remaining": 800})
+        self.assertEqual((state["entry"]["reward_status"], state["wallet"]["balance"]), ("unclaimed", 0))
+        self.assertEqual(self.request("/api/shop", user=1)[1]["ledger"], [])
+        self.request("/api/admin/settings", {"daily_points_limit": 1000}, admin=True)
+        code, result = self.request("/api/claim", {}, user=1)
+        self.assertEqual(code, 200)
+        self.assertEqual(result["wallet"]["balance"], 1000)
+        self.assertEqual(result["quota"]["remaining"], 0)
+        self.request("/api/admin/settings", {"daily_points_limit": 0}, admin=True)
+        self.assertEqual(self.request("/api/claim", {}, user=1)[1]["wallet"]["balance"], 1000)
+
+    def test_concurrent_claims_cannot_exceed_site_daily_budget(self):
+        self.request("/api/admin/settings", {"daily_points_limit": 800, "reward_tiers": [{"through": 50, "amount": 500}]}, admin=True)
+        self.open()
+        self.complete(1)
+        self.complete(2)
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+            results = list(pool.map(lambda user: self.request("/api/claim", {}, user=user), [1, 2]))
+        self.assertEqual(sorted(code for code, _ in results), [200, 409])
+        state = self.request("/api/status")[1]
+        self.assertEqual(state["quota"], {"limit": 800, "used": 500, "remaining": 300})
+        self.assertEqual(sum(self.request("/api/shop", user=user)[1]["wallet"]["balance"] for user in [1, 2]), 500)
+        self.request("/api/admin/settings", {"reward_tiers": [{"through": 50, "amount": 300}]}, admin=True)
+        self.complete(3)
+        code, result = self.request("/api/claim", {}, user=3)
+        self.assertEqual(code, 200)
+        self.assertEqual(result["quota"], {"limit": 800, "used": 800, "remaining": 0})
+        self.complete(4)
+        code, result = self.request("/api/claim", {}, user=4)
+        self.assertEqual(code, 409)
+        self.assertIn("已用完", result["error"])
+        self.assertEqual(self.request("/api/shop", user=4)[1]["wallet"]["balance"], 0)
+
+    def test_each_trigger_is_recorded_and_claim_requires_qualified_intervals(self):
+        self.open()
+        _, result = self.request("/api/session/start", {}, user=1)
+        token = result["session"]["token"]
+        self.assertEqual(self.request("/api/session/complete", {"token": token}, user=1)[0], 409)
+        self.assertEqual(self.request("/api/session/step", {"token": token}, user=1)[0], 429)
+        for _ in range(2):
+            app.time.time.return_value = app.time.time() + 2
+            _, result = self.request("/api/session/step", {"token": token}, user=1)
+            token = result["session"]["token"]
+        self.assertEqual(self.request("/api/claim", {}, user=1)[0], 409)
+        self.assertEqual(self.request("/api/session/complete", {"token": token}, user=1)[0], 429)
+        app.time.time.return_value = app.time.time() + 2
+        self.assertEqual(self.request("/api/session/complete", {"token": token}, user=1)[0], 200)
+        with app.db() as connection:
+            events = connection.execute("SELECT group_no,created_at FROM practice_triggers WHERE user_id='1' ORDER BY id").fetchall()
+            self.assertEqual([row["group_no"] for row in events], [1, 2, 3])
+            self.assertEqual([row["created_at"] for row in events], [self.now, self.now + 2, self.now + 4])
+            connection.execute("UPDATE practice_triggers SET created_at=? WHERE user_id='1' AND group_no=2", (self.now + .5,))
+        self.assertEqual(self.request("/api/claim", {}, user=1)[0], 429)
+        self.assertEqual(self.request("/api/shop", user=1)[1]["wallet"]["balance"], 0)
+
+    def test_ten_minute_boundary_resets_flow_and_keeps_old_trigger_history(self):
+        self.open()
+        _, result = self.request("/api/session/start", {}, user=1)
+        old_token = result["session"]["token"]
+        app.time.time.return_value = self.now + 600
+        self.assertIsNone(self.request("/api/status", user=1)[1]["session"])
+        self.assertEqual(self.request("/api/session/step", {"token": old_token}, user=1)[0], 409)
+        _, result = self.request("/api/session/start", {}, user=1)
+        self.assertEqual(result["session"]["step"], 0)
+        token = result["session"]["token"]
+        self.assertNotEqual(token, old_token)
+        app.time.time.return_value = self.now + 1199
+        code, result = self.request("/api/session/step", {"token": token}, user=1)
+        self.assertEqual(code, 200, result)
+        self.assertEqual(result["session"]["expires_in"], 600)
+        app.time.time.return_value = self.now + 1799
+        self.assertEqual(self.request("/api/session/step", {"token": result["session"]["token"]}, user=1)[0], 409)
+        with app.db() as connection:
+            rows = connection.execute("SELECT flow_id,group_no FROM practice_triggers WHERE user_id='1' ORDER BY id").fetchall()
+            self.assertEqual([row["group_no"] for row in rows], [1, 1, 2])
+            self.assertNotEqual(rows[0]["flow_id"], rows[1]["flow_id"])
+
+    def test_anonymous_practice_records_three_triggers_without_ranking(self):
+        cookie = app.sign_payload({"purpose": "visitor", "visitor": "anon-test", "exp": self.now + 3600})
+        headers = {"Cookie": "checkin_visitor=" + cookie}
+        _, result = self.request("/api/session/start", {}, headers=headers)
+        self.assertFalse(result["session"]["eligible"])
+        for _ in range(2):
+            app.time.time.return_value = app.time.time() + 2
+            _, result = self.request("/api/session/step", {"token": result["session"]["token"]}, headers=headers)
+        app.time.time.return_value = app.time.time() + 2
+        code, result = self.request("/api/session/complete", {"token": result["session"]["token"]}, headers=headers)
+        self.assertEqual(code, 200, result)
+        self.assertIsNone(result["entry"])
+        self.assertEqual(self.request("/api/status", headers=headers)[1]["total"], 0)
+        triggers = self.request("/api/admin", admin=True)[1]["practice_triggers"]
+        self.assertEqual([item["group_no"] for item in triggers], [3, 2, 1])
+
+    def test_admin_product_catalog_crud_and_shop_listing(self):
+        code, result = self.request("/api/admin/products", {
+            "category": "LDC", "name": "1.00 LDC 兑换", "description": "提肛达人专属兑换",
+            "points_price": 500, "ldc_amount": "1.00", "user_daily_limit": 1, "total_daily_limit": 5, "is_active": True
+        }, admin=True)
+        self.assertEqual(code, 200)
+        product_id = result["product"]["id"]
+        self.assertEqual(result["product"]["category"], "LDC")
+        self.assertEqual(result["product"]["ldc_amount"], "1.00")
+        self.assertEqual(result["product"]["user_daily_limit"], 1)
+        self.assertEqual(result["product"]["total_daily_limit"], 5)
+
+        shop = self.request("/api/shop")[1]
+        self.assertEqual(len(shop["products"]), 1)
+        self.assertEqual(shop["products"][0]["name"], "1.00 LDC 兑换")
+        self.assertEqual(shop["products"][0]["points_price"], 500)
+
+        # Update
+        self.request("/api/admin/products", {
+            "id": product_id, "category": "LDC", "name": "2.00 LDC 兑换", "description": "高级达人专属",
+            "points_price": 800, "ldc_amount": "2.00", "user_daily_limit": 2, "total_daily_limit": 10, "is_active": True
+        }, admin=True)
+        shop = self.request("/api/shop")[1]
+        self.assertEqual(shop["products"][0]["name"], "2.00 LDC 兑换")
+        self.assertEqual(shop["products"][0]["ldc_amount"], "2.00")
+        self.assertEqual(shop["products"][0]["points_price"], 800)
+
+        # Archive
+        self.request(f"/api/admin/products/{product_id}/archive", {}, admin=True)
+        self.assertEqual(self.request("/api/shop")[1]["products"], [])
+        admin_state = self.request("/api/admin", admin=True)[1]
+        self.assertEqual(len(admin_state["products"]), 1)
+        self.assertFalse(admin_state["products"][0]["is_active"])
+
+    def test_purchase_ldc_product_auto_delivery_and_limits(self):
+        # 1. Create product with user_daily_limit=1, total_daily_limit=2
+        code, res = self.request("/api/admin/products", {
+            "category": "LDC", "name": "0.50 LDC", "description": "自动发货到账号",
+            "points_price": 300, "ldc_amount": "0.50", "user_daily_limit": 1, "total_daily_limit": 2, "is_active": True
+        }, admin=True)
+        pid = res["product"]["id"]
+
+        # 2. Give user 1 and user 2 some points via checkin
+        self.open()
+        self.complete(1)
+        self.request("/api/claim", {}, user=1) # user1 has 1000 points
+        self.complete(2)
+        self.request("/api/claim", {}, user=2) # user2 has 500 points
+
+        # 3. User 1 purchases -> simulated auto delivery
+        code, purchase_res = self.request("/api/shop/purchase", {"product_id": pid}, user=1)
+        self.assertEqual(code, 200, purchase_res)
+        self.assertEqual(purchase_res["status"], "simulated")
+        self.assertTrue(purchase_res["trade_no"].startswith("SIM-"))
+
+        # Points deducted: 1000 - 300 = 700
+        shop1 = self.request("/api/shop", user=1)[1]
+        self.assertEqual(shop1["wallet"]["balance"], 700)
+        self.assertEqual(len(shop1["purchases"]), 1)
+        self.assertEqual(shop1["purchases"][0]["status"], "simulated")
+        self.assertEqual(shop1["purchases"][0]["points_cost"], 300)
+        self.assertEqual(shop1["purchases"][0]["ldc_amount"], "0.50")
+
+        # 4. User 1 tries to purchase again -> blocked by user_daily_limit=1
+        code, err_res = self.request("/api/shop/purchase", {"product_id": pid}, user=1)
+        self.assertEqual(code, 400)
+        self.assertIn("单人兑换限额", err_res["error"])
+        self.assertEqual(self.request("/api/shop", user=1)[1]["wallet"]["balance"], 700)
+
+        # 5. User 2 purchases -> succeeds (reaches total_daily_limit=2)
+        code, purchase_res2 = self.request("/api/shop/purchase", {"product_id": pid}, user=2)
+        self.assertEqual(code, 200)
+        self.assertEqual(self.request("/api/shop", user=2)[1]["wallet"]["balance"], 700) # 1000 - 300 = 700
+
+        # 6. User 3 has points but total quota for this product is exhausted
+        with app.db() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            credits.credit_checkin(conn, {"id": "3", "username": "user3"}, 1000, "seed-user3", self.now)
+        code, err_res2 = self.request("/api/shop/purchase", {"product_id": pid}, user=3)
+        self.assertEqual(code, 400)
+        self.assertIn("全站兑换限额已满", err_res2["error"])
+        self.assertEqual(self.request("/api/shop", user=3)[1]["wallet"]["balance"], 1000)
+
+    def test_purchase_ldc_auto_delivery_live_and_failure_refund(self):
+        # Product 0.50 LDC for 200 points
+        code, res = self.request("/api/admin/products", {
+            "category": "LDC", "name": "即时到账 LDC", "description": "实时接口分发",
+            "points_price": 200, "ldc_amount": "0.50", "user_daily_limit": 0, "total_daily_limit": 0, "is_active": True
+        }, admin=True)
+        pid = res["product"]["id"]
+
+        with app.db() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            credits.credit_checkin(conn, {"id": "10", "username": "user10"}, 500, "seed-user10", self.now)
+        # A) Successful live dispatch
+        with patch.dict(os.environ, {"LDC_LIVE": "true", "LDC_CLIENT_ID": "client", "LDC_CLIENT_SECRET": "secret"}):
+            with patch.object(app, "json_request", return_value={"code": 1, "data": {"trade_no": "REAL-LDC-123"}}) as mock_dist:
+                code, p_res = self.request("/api/shop/purchase", {"product_id": pid}, user=10)
+                self.assertEqual(code, 200)
+                self.assertEqual(p_res["status"], "success")
+                self.assertEqual(p_res["trade_no"], "REAL-LDC-123")
+                self.assertEqual(self.request("/api/shop", user=10)[1]["wallet"]["balance"], 300)
+                self.assertEqual(mock_dist.call_count, 1)
+                call_data = mock_dist.call_args.kwargs["data"]
+                self.assertEqual(call_data["user_id"], 10)
+                self.assertEqual(call_data["username"], "user10")
+                self.assertEqual(call_data["amount"], "0.50")
+
+        # B) Failed live dispatch -> auto refund points!
+        with patch.dict(os.environ, {"LDC_LIVE": "true", "LDC_CLIENT_ID": "client", "LDC_CLIENT_SECRET": "secret"}):
+            with patch.object(app, "json_request", return_value={"code": -1, "error_msg": "商户可用余额不足"}):
+                code, p_res = self.request("/api/shop/purchase", {"product_id": pid}, user=10)
+                self.assertEqual(code, 200)
+                self.assertEqual(p_res["status"], "failed")
+                # Points were refunded back to 300!
+                shop10 = self.request("/api/shop", user=10)[1]
+                self.assertEqual(shop10["wallet"]["balance"], 300)
+                # Ledger has purchase (-200) and refund (+200)
+                deltas = [item["delta"] for item in shop10["ledger"]]
+                self.assertIn(-200, deltas)
+                self.assertIn(200, deltas)
+
+        # C) Insufficient balance
+        code, err = self.request("/api/shop/purchase", {"product_id": pid}, user=999) # user 999 has 0 points
+        self.assertEqual(code, 400)
+        self.assertIn("余额不足", err["error"])
+
+
+    def test_intermediate_ldc_history_preserved_without_minting_points(self):
+        with app.db() as connection:
+            connection.execute("DROP TABLE entries")
+            connection.execute("CREATE TABLE entries(day TEXT,user_id TEXT,amount TEXT,payout_status TEXT)")
+            connection.execute("INSERT INTO entries VALUES ('2026-10-25','1','1.00','success')")
+            connection.execute("INSERT INTO checkin_settings(key,value) VALUES ('reward_tiers',?)", (json.dumps([{"through": 10, "amount": "1.25"}]),))
+        app.init_db()
+        with app.db() as connection:
+            legacy = connection.execute("SELECT amount,payout_status FROM legacy_ldc_entries").fetchone()
+            self.assertEqual(tuple(legacy), ("1.00", "success"))
+            self.assertEqual(connection.execute("SELECT COUNT(*) FROM entries").fetchone()[0], 0)
+            self.assertEqual(app.settings(connection)["reward_tiers"], [{"through": 10, "amount": 1250}])
+        app.init_db()
+        self.assertEqual(self.request("/api/shop", user=1)[1]["wallet"]["balance"], 0)
+
+
+if __name__ == "__main__":
+    unittest.main()
