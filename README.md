@@ -20,6 +20,8 @@ python3 app.py
 
 签到必须通过 Connect OAuth 登录，不提供演示身份。将应用回调地址配置为 `http://localhost:8000/auth/linuxdo/callback`，部署后改为公开 HTTPS 地址并同步 `APP_BASE_URL` 与 `LINUXDO_REDIRECT_URI`。未配置 OAuth 时无法签到。`ADMIN_TOKEN` 未设置时所有管理接口拒绝访问；触发接口同样需要独立的 `CHECKIN_TRIGGER_TOKEN`。
 
+配置完整的 `LINUXDO_CLIENT_ID` 与 `LINUXDO_CLIENT_SECRET` 后，未登录访客访问首页、商店、赞助页或管理页会直接进入 LINUX DO 授权登录，不会先进行匿名打卡；相关用户数据和练习接口会返回 `401`。登录成功后回到原页面，仍需按原规则完成打卡才能领取奖励。登录 Cookie 有效期为 **5 天**，有效期内访问已认证页面或业务接口时自动续至访问后的 5 天；连续 5 天未访问或主动退出后需重新登录。图标、支付通知与使用独立口令的管理/触发接口保持原访问方式。
+
 | 环境变量 | 用途与默认值 |
 | --- | --- |
 | `CHECKIN_DB` | SQLite 文件路径，默认 `checkin.db`。旧 `redpacket.db` 保留但不再使用。 |

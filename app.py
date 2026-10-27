@@ -66,6 +66,7 @@ DAILY_LDC_LIMIT = int(os.environ.get("DAILY_LDC_LIMIT", "800"))
 if not 0 <= DAILY_LDC_LIMIT <= 100_000_000:
     raise ValueError("DAILY_LDC_LIMIT 须为 0–100000000 的整数 LDC")
 SITE_TZ = ZoneInfo("Asia/Shanghai")
+LOGIN_SESSION_SECONDS = 5 * 24 * 60 * 60
 DEFAULT_SETTINGS = {
     "deadline": "22:00", "min_step_seconds": 8,
     "reward_tiers": [{"through": 10, "amount": 1000},
@@ -380,6 +381,9 @@ class AppHandler(SimpleHTTPRequestHandler):
         self.send_header("X-Frame-Options", "DENY")
         self.send_header("Referrer-Policy", "same-origin")
         self.send_header("Cache-Control", "no-store")
+        if getattr(self, "session_user", None) and urllib.parse.urlsplit(self.path).path != "/auth/logout":
+            session = sign_payload({"purpose": "session", **self.session_user, "exp": time.time() + LOGIN_SESSION_SECONDS})
+            self.send_header("Set-Cookie", self.cookie("linuxdo_session", session, LOGIN_SESSION_SECONDS))
         super().end_headers()
 
     def json_response(self, value, status=200):
@@ -408,7 +412,8 @@ class AppHandler(SimpleHTTPRequestHandler):
         payload = verify_payload(self.cookie_values().get("linuxdo_session", ""))
         if not payload or payload.get("purpose") != "session" or not str(payload.get("id", "")).isdigit() or not payload.get("username"):
             return None
-        return {"id": str(payload["id"]), "username": payload["username"], "name": payload.get("name") or payload["username"]}
+        self.session_user = {"id": str(payload["id"]), "username": payload["username"], "name": payload.get("name") or payload["username"]}
+        return self.session_user
 
     def require_user(self):
         user = self.current_user()
@@ -443,6 +448,15 @@ class AppHandler(SimpleHTTPRequestHandler):
     def do_GET(self):
         parsed = urllib.parse.urlsplit(self.path)
         try:
+            if os.environ.get("LINUXDO_CLIENT_ID") and os.environ.get("LINUXDO_CLIENT_SECRET"):
+                pages = {"/": "/", "/index.html": "/", "/shop": "/shop", "/shop.html": "/shop",
+                         "/donate": "/donate", "/donate.html": "/donate", "/admin": "/admin", "/admin.html": "/admin"}
+                if parsed.path in pages and not self.current_user():
+                    self.path = "/auth/linuxdo/start?" + urllib.parse.urlencode({"next": pages[parsed.path]})
+                    self.start_oauth()
+                    return
+                if parsed.path in {"/api/status", "/api/shop", "/api/donations"}:
+                    self.require_user()
             if parsed.path == "/api/icon":
                 query = urllib.parse.parse_qs(parsed.query, keep_blank_values=True)
                 requested_sizes = query.get("size")
@@ -542,6 +556,9 @@ class AppHandler(SimpleHTTPRequestHandler):
             body = json.loads(self.rfile.read(length) or b"{}")
             if not isinstance(body, dict):
                 raise APIError("请求体需为 JSON 对象")
+            if os.environ.get("LINUXDO_CLIENT_ID") and os.environ.get("LINUXDO_CLIENT_SECRET"):
+                if urllib.parse.urlsplit(self.path).path in {"/api/visit", "/api/session/start", "/api/session/step", "/api/session/complete"}:
+                    self.require_user()
             self.post_route(urllib.parse.urlsplit(self.path).path, body)
         except (APIError, practice.PracticeError) as exc:
             self.json_response({"ok": False, "error": str(exc)}, exc.status)
@@ -710,7 +727,7 @@ class AppHandler(SimpleHTTPRequestHandler):
             raise APIError("尚未配置 LINUX DO Connect", 503)
         query = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
         next_path = query.get("next", ["/"])[0]
-        if next_path not in {"/", "/shop", "/donate"}:
+        if next_path not in {"/", "/shop", "/donate", "/admin"}:
             next_path = "/"
         state = secrets.token_urlsafe(32)
         state_cookie = sign_payload({"purpose": "oauth", "state": state, "next": next_path, "exp": time.time() + 600})
@@ -734,11 +751,11 @@ class AppHandler(SimpleHTTPRequestHandler):
         profile = profile.get("data", profile)
         if not str(profile.get("id", "")).isdigit() or not isinstance(profile.get("username"), str) or not profile["username"]:
             raise APIError("登录服务返回的用户身份不完整", 502)
-        session = sign_payload({"purpose": "session", "id": str(profile["id"]), "username": profile["username"], "name": profile.get("name"), "exp": time.time() + 604800})
+        session = sign_payload({"purpose": "session", "id": str(profile["id"]), "username": profile["username"], "name": profile.get("name"), "exp": time.time() + LOGIN_SESSION_SECONDS})
         self.send_response(303)
-        self.send_header("Set-Cookie", self.cookie("linuxdo_session", session, 604800))
+        self.send_header("Set-Cookie", self.cookie("linuxdo_session", session, LOGIN_SESSION_SECONDS))
         self.send_header("Set-Cookie", self.cookie("oauth_state", "", 0))
-        self.send_header("Location", saved.get("next") if saved.get("next") in {"/", "/shop", "/donate"} else "/")
+        self.send_header("Location", saved.get("next") if saved.get("next") in {"/", "/shop", "/donate", "/admin"} else "/")
         self.end_headers()
 
 

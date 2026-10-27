@@ -38,7 +38,8 @@ class CheckinBehavior(unittest.TestCase):
         self.config = patch.multiple(app, DB_PATH=Path(self.temp.name) / "test.db", ADMIN_TOKEN="test-admin", TRIGGER_TOKEN="test-trigger")
         self.config.start()
         self.addCleanup(self.config.stop)
-        self.environment = patch.dict(os.environ, {"LDC_DONATION_ENABLED": "false", "LDC_CLIENT_ID": "", "LDC_CLIENT_SECRET": ""})
+        self.environment = patch.dict(os.environ, {"LDC_DONATION_ENABLED": "false", "LDC_CLIENT_ID": "", "LDC_CLIENT_SECRET": "",
+                                                   "LINUXDO_CLIENT_ID": "", "LINUXDO_CLIENT_SECRET": ""})
         self.environment.start()
         self.addCleanup(self.environment.stop)
         app.init_db()
@@ -91,6 +92,62 @@ class CheckinBehavior(unittest.TestCase):
         code, result = self.request("/api/session/complete", {"token": session["token"]}, user=user)
         self.assertEqual(code, 200, result)
         return result["entry"]
+
+    def auth_response(self, path, cookie=""):
+        connection = http.client.HTTPConnection(*self.server.server_address, timeout=10)
+        try:
+            connection.request("GET", path, headers={"Cookie": cookie} if cookie else {})
+            response = connection.getresponse()
+            return response.status, response.getheaders(), response.read()
+        finally:
+            connection.close()
+
+    def test_configured_oauth_gates_pages_and_blocks_anonymous_practice(self):
+        with patch.dict(os.environ, {"LINUXDO_CLIENT_ID": "client", "LINUXDO_CLIENT_SECRET": "secret"}):
+            for path, target in [("/", "/"), ("/index.html", "/"), ("/shop", "/shop"), ("/shop.html", "/shop"), ("/donate", "/donate"), ("/donate.html", "/donate"), ("/admin", "/admin"), ("/admin.html", "/admin")]:
+                code, headers, _ = self.auth_response(path)
+                self.assertEqual(code, 302)
+                self.assertTrue(dict(headers)["Location"].startswith("https://connect.linux.do/oauth2/authorize?"))
+                state_cookie = next(value.split(";", 1)[0].split("=", 1)[1] for key, value in headers if key == "Set-Cookie")
+                self.assertEqual(app.verify_payload(state_cookie)["next"], target)
+            for path in ("/api/status", "/api/shop", "/api/donations"):
+                self.assertEqual(self.request(path)[0], 401)
+            for path in ("/api/visit", "/api/session/start", "/api/session/step", "/api/session/complete"):
+                self.assertEqual(self.request(path, {})[0], 401)
+            with app.db() as connection:
+                self.assertEqual(connection.execute("SELECT COUNT(*) FROM sessions").fetchone()[0], 0)
+                self.assertEqual(connection.execute("SELECT COUNT(*) FROM practice_triggers").fetchone()[0], 0)
+            self.assertEqual(self.auth_response("/api/icon?size=32")[0], 200)
+            self.assertEqual(self.request("/api/status", user=1)[0], 200)
+        self.assertEqual(self.auth_response("/")[0], 200)
+
+    def test_oauth_session_lasts_five_days_and_renews_until_expiry(self):
+        saved = app.sign_payload({"purpose": "oauth", "state": "state", "next": "/shop", "exp": self.now + 600})
+        with patch.object(app, "json_request", side_effect=[{"access_token": "access"}, {"id": 1, "username": "alice", "name": "Alice"}]):
+            code, headers, _ = self.auth_response("/auth/linuxdo/callback?code=code&state=state", "oauth_state=" + saved)
+        self.assertEqual((code, dict(headers)["Location"]), (303, "/shop"))
+        session_header = next(value for key, value in headers if key == "Set-Cookie" and value.startswith("linuxdo_session="))
+        self.assertIn("Max-Age=432000", session_header)
+        self.assertIn("HttpOnly", session_header)
+        session_cookie = session_header.split(";", 1)[0]
+        self.assertEqual(app.verify_payload(session_cookie.split("=", 1)[1])["exp"], self.now + 432000)
+        app.time.time.return_value = self.now + 4 * 86400
+        code, headers, _ = self.auth_response("/api/status", session_cookie)
+        self.assertEqual(code, 200)
+        renewed_cookie = next(value.split(";", 1)[0] for key, value in headers if key == "Set-Cookie" and value.startswith("linuxdo_session="))
+        renewed = app.verify_payload(renewed_cookie.split("=", 1)[1])
+        self.assertEqual((renewed["id"], renewed["username"], renewed["exp"]), ("1", "alice", self.now + 9 * 86400))
+        with patch.dict(os.environ, {"LINUXDO_CLIENT_ID": "client", "LINUXDO_CLIENT_SECRET": "secret"}):
+            app.time.time.return_value = self.now + 6 * 86400
+            self.assertEqual(self.auth_response("/", renewed_cookie)[0], 200)
+            code, headers, _ = self.auth_response("/", session_cookie)
+            self.assertEqual(code, 302)
+            self.assertFalse(any(key == "Set-Cookie" and value.startswith("linuxdo_session=") for key, value in headers))
+            code, headers, _ = self.auth_response("/auth/logout", renewed_cookie)
+            session_headers = [value for key, value in headers if key == "Set-Cookie" and value.startswith("linuxdo_session=")]
+            self.assertEqual(code, 303)
+            self.assertEqual(len(session_headers), 1)
+            self.assertIn("Max-Age=0", session_headers[0])
 
     def test_auth_closed_admin_and_trigger_guards(self):
         self.assertEqual(self.request("/api/admin")[0], 401)
