@@ -373,6 +373,46 @@ button:disabled {
   display: grid;
   grid-template-columns: 1.25fr 1fr;
   gap: 24px;
+  align-items: start;
+}
+
+/* Collapsible card (rules + quota) */
+.card-collapse {
+  padding: 0;
+}
+/* Specificity beats .card-header-line declared later */
+.card-collapse > .collapse-summary {
+  list-style: none;
+  cursor: pointer;
+  align-items: center;
+  margin: 0;
+  padding: 20px 24px;
+  gap: 12px;
+  border-radius: var(--radius);
+  transition: background-color 0.15s ease;
+}
+.card-collapse > .collapse-summary::-webkit-details-marker {
+  display: none;
+}
+.card-collapse > .collapse-summary:hover {
+  background: var(--bg-subtle);
+}
+.card-collapse > .collapse-summary:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: -2px;
+}
+.collapse-chevron {
+  width: 16px;
+  height: 16px;
+  flex: none;
+  color: var(--text-dim);
+  transition: transform 0.2s ease;
+}
+.card-collapse[open] .collapse-chevron {
+  transform: rotate(180deg);
+}
+.collapse-body {
+  padding: 0 24px 24px;
 }
 .card-header-line {
   display: flex;
@@ -829,6 +869,15 @@ button:disabled {
   }
   .card {
     padding: 20px 16px;
+  }
+  .card-collapse {
+    padding: 0;
+  }
+  .card-collapse > .collapse-summary {
+    padding: 16px;
+  }
+  .collapse-body {
+    padding: 0 16px 16px;
   }
   .completion-grid, .shop-columns, .metrics-row {
     grid-template-columns: 1fr;

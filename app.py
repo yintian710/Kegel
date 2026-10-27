@@ -5,6 +5,7 @@ import hashlib
 import hmac
 import json
 import os
+import re
 import secrets
 import sqlite3
 import threading
@@ -445,7 +446,17 @@ class AppHandler(SimpleHTTPRequestHandler):
     def do_GET(self):
         parsed = urllib.parse.urlsplit(self.path)
         try:
-            if parsed.path == "/api/status":
+            if parsed.path == "/api/icon":
+                query = urllib.parse.parse_qs(parsed.query, keep_blank_values=True)
+                requested_sizes = query.get("size")
+                if requested_sizes is None:
+                    self.path = "/img/icon.png"
+                elif len(requested_sizes) == 1 and requested_sizes[0] in {"16", "32", "48", "64", "128", "180", "192", "256", "512", "1024"}:
+                    self.path = f"/img/icon-{requested_sizes[0]}.png"
+                else:
+                    raise APIError("size 仅支持 16、32、48、64、128、180、192、256、512、1024")
+                super().do_GET()
+            elif parsed.path == "/api/status":
                 with db() as connection:
                     result = status_view(connection, self.current_user(), time.time(), self.practice_identity()["id"])
                 self.json_response(result)
@@ -512,7 +523,7 @@ class AppHandler(SimpleHTTPRequestHandler):
                 self.send_header("Set-Cookie", self.cookie("linuxdo_session", "", 0))
                 self.send_header("Location", "/")
                 self.end_headers()
-            elif parsed.path in {"/", "/admin", "/shop", "/donate", "/index.html", "/admin.html", "/shop.html", "/donate.html", "/app.js", "/admin.js", "/shop.js", "/donate.js", "/styles.css", "/favicon.svg"}:
+            elif parsed.path in {"/", "/admin", "/shop", "/donate", "/index.html", "/admin.html", "/shop.html", "/donate.html", "/app.js", "/admin.js", "/shop.js", "/donate.js", "/styles.css", "/favicon.svg"} or re.fullmatch(r"/img/[A-Za-z0-9_-]+\.(?:png|svg|webp)", parsed.path):
                 self.path = {"/": "/index.html", "/admin": "/admin.html", "/shop": "/shop.html", "/donate": "/donate.html"}.get(parsed.path, parsed.path)
                 super().do_GET()
             else:

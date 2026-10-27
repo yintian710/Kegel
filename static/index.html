@@ -7,6 +7,8 @@
     <meta name="description" content="每天三组，给自己一点向上的力量。LINUX DO 每日提肛打卡。" />
     <title>你今天提肛了吗？</title>
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="icon" href="/img/icon-32.png" sizes="32x32" type="image/png" />
+    <link rel="apple-touch-icon" href="/img/apple-touch-icon.png" />
     <link rel="stylesheet" href="/styles.css" />
     <script src="/app.js" defer></script>
   </head>
@@ -78,26 +80,29 @@
               </table>
             </div>
 
-            <!-- Right: Rules & Quota -->
-            <div class="card">
-              <div class="card-header-line">
+            <!-- Right: Rules & Quota (collapsed by default) -->
+            <details class="card card-collapse" id="rewardDetails">
+              <summary class="card-header-line collapse-summary">
                 <h3 class="card-title">奖励规则 <span class="card-subtitle">根据今日打卡名次获得对应站内积分</span></h3>
-              </div>
-              <ul id="rewardRules" class="rules-list"></ul>
+                <svg class="collapse-chevron" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              </summary>
+              <div class="collapse-body">
+                <ul id="rewardRules" class="rules-list"></ul>
 
-              <div class="quota-box">
-                <div class="card-header-line" style="margin-bottom: 10px;">
-                  <h4 class="card-title" style="font-size: 15px;">今日额度 <span class="card-subtitle">每日奖励总额度有限，先到先得</span></h4>
-                </div>
-                <div class="quota-labels">
-                  <span id="quotaUsedText">每日已用 0 / 800</span>
-                  <span id="quotaRemainingText" style="color: var(--primary); font-weight: 600;">剩余 800</span>
-                </div>
-                <div class="quota-bar-track">
-                  <div id="quotaBarFill" class="quota-bar-fill" style="width: 0%"></div>
+                <div class="quota-box">
+                  <div class="card-header-line" style="margin-bottom: 10px;">
+                    <h4 class="card-title" style="font-size: 15px;">今日额度 <span class="card-subtitle">每日奖励总额度有限，先到先得</span></h4>
+                  </div>
+                  <div class="quota-labels">
+                    <span id="quotaUsedText">每日已用 0 / 800</span>
+                    <span id="quotaRemainingText" style="color: var(--primary); font-weight: 600;">剩余 800</span>
+                  </div>
+                  <div class="quota-bar-track">
+                    <div id="quotaBarFill" class="quota-bar-fill" style="width: 0%"></div>
+                  </div>
                 </div>
               </div>
-            </div>
+            </details>
           </div>
         </section>
       </div>
