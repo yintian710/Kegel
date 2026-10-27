@@ -181,10 +181,12 @@
           </div>
         </section>
 
-        <!-- Section Products Management (New per requirement!) -->
+        <!-- Section Products Management -->
         <section id="sec-products" style="margin-bottom: 36px;">
           <h2 style="font-size: 20px; font-weight: 700; margin: 0 0 16px 0;">商品管理</h2>
-          <div style="display: grid; grid-template-columns: 360px 1fr; gap: 20px;">
+          
+          <!-- Top: Form + Products List Table -->
+          <div style="display: grid; grid-template-columns: 340px minmax(0, 1fr); gap: 20px; margin-bottom: 24px;">
             <!-- Product Form -->
             <div class="card">
               <h3 id="productFormTitle" style="font-size: 16px; font-weight: 700; margin: 0 0 16px 0;">添加上架商品</h3>
@@ -235,62 +237,62 @@
               </form>
             </div>
 
-            <!-- Products List Table & Purchases -->
-            <div>
-              <details class="card card-collapse" open style="margin-bottom: 24px;">
-                <summary class="collapse-summary">
-                  <h3 class="card-title">商品列表 (LDC 品类)</h3>
-                  <svg class="collapse-chevron" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
-                </summary>
-                <div class="collapse-body">
-                  <div class="table-wrap" style="max-height: 380px;">
-                    <table class="data-table">
-                      <thead>
-                        <tr>
-                          <th>ID</th>
-                          <th>品类</th>
-                          <th>名称</th>
-                          <th>售价</th>
-                          <th>发货数量</th>
-                          <th>每日限购</th>
-                          <th>状态</th>
-                          <th>操作</th>
-                        </tr>
-                      </thead>
-                      <tbody id="productRows"></tbody>
-                    </table>
-                  </div>
+            <!-- Products List Table -->
+            <details class="card card-collapse" open>
+              <summary class="collapse-summary">
+                <h3 class="card-title">商品列表 (LDC 品类)</h3>
+                <svg class="collapse-chevron" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              </summary>
+              <div class="collapse-body">
+                <div class="table-wrap" style="max-height: 380px;">
+                  <table class="data-table" style="min-width: 680px;">
+                    <thead>
+                      <tr>
+                        <th>ID</th>
+                        <th>品类</th>
+                        <th>名称</th>
+                        <th>售价</th>
+                        <th>发货数量</th>
+                        <th>每日限购</th>
+                        <th>状态</th>
+                        <th>操作</th>
+                      </tr>
+                    </thead>
+                    <tbody id="productRows"></tbody>
+                  </table>
                 </div>
-              </details>
-
-              <details class="card card-collapse" open>
-                <summary class="collapse-summary">
-                  <div>
-                    <h3 class="card-title">自动发货与兑换记录</h3>
-                    <span class="card-subtitle">用户积分购买商品后的实时发货流水状态</span>
-                  </div>
-                  <svg class="collapse-chevron" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
-                </summary>
-                <div class="collapse-body">
-                  <div class="table-wrap" style="max-height: 420px;">
-                    <table class="data-table">
-                      <thead>
-                        <tr>
-                          <th>订单号</th>
-                          <th>用户</th>
-                          <th>商品 / LDC</th>
-                          <th>消耗积分</th>
-                          <th>发货状态</th>
-                          <th>单号 / 错误</th>
-                          <th>时间</th>
-                        </tr>
-                      </thead>
-                      <tbody id="purchaseRows"></tbody>
-                    </table>
-                  </div>
-                </div>
-              </details>
+              </div>
+            </details>
           </div>
+
+          <!-- Bottom: Full-Width Automatic delivery & Purchases Table -->
+          <details class="card card-collapse" open>
+            <summary class="collapse-summary">
+              <div>
+                <h3 class="card-title">自动发货与兑换记录</h3>
+                <span class="card-subtitle">用户积分购买商品后的实时发货流水状态</span>
+              </div>
+              <svg class="collapse-chevron" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </summary>
+            <div class="collapse-body">
+              <div class="table-wrap" style="max-height: 320px;">
+                <table class="data-table" style="min-width: 900px;">
+                  <thead>
+                    <tr>
+                      <th>订单号</th>
+                      <th>用户</th>
+                      <th>商品 / LDC</th>
+                      <th>消耗积分</th>
+                      <th>发货状态</th>
+                      <th>单号 / 错误</th>
+                      <th>时间</th>
+                    </tr>
+                  </thead>
+                  <tbody id="purchaseRows"></tbody>
+                </table>
+              </div>
+            </div>
+          </details>
         </section>
 
         <!-- Section Practice Triggers -->
@@ -301,8 +303,8 @@
               <svg class="collapse-chevron" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
             </summary>
             <div class="collapse-body">
-              <div class="table-wrap" style="max-height: 400px;">
-                <table class="data-table">
+              <div class="table-wrap" style="max-height: 280px;">
+                <table class="data-table" style="min-width: 640px;">
                   <thead>
                     <tr>
                       <th>用户</th>
@@ -321,7 +323,7 @@
         <!-- Section Records: Rewards & User Wallets -->
         <section id="sec-records" style="margin-bottom: 40px;">
           <h2 style="font-size: 20px; font-weight: 700; margin: 0 0 16px 0;">记录查询</h2>
-          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+          <div style="display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 20px;">
             <!-- Rewards History -->
             <details class="card card-collapse" open>
               <summary class="collapse-summary">
@@ -329,8 +331,8 @@
                 <svg class="collapse-chevron" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
               </summary>
               <div class="collapse-body">
-                <div class="table-wrap" style="max-height: 420px;">
-                  <table class="data-table">
+                <div class="table-wrap" style="max-height: 280px;">
+                  <table class="data-table" style="min-width: 560px;">
                     <thead>
                       <tr>
                         <th>日期 / 排名</th>
@@ -359,8 +361,8 @@
                   <button class="btn-secondary" type="submit" style="flex-shrink: 0; white-space: nowrap;">搜索</button>
                 </form>
                 <p id="userSearchStatus" style="font-size: 12px; color: var(--text-dim);" role="status"></p>
-                <div class="table-wrap" style="max-height: 420px;">
-                  <table class="data-table">
+                <div class="table-wrap" style="max-height: 280px;">
+                  <table class="data-table" style="min-width: 520px;">
                     <thead>
                       <tr>
                         <th>用户</th>

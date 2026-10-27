@@ -12,6 +12,12 @@ function notify(message) {
   clearTimeout(notify.timer);
   notify.timer = setTimeout(() => { notice.hidden = true; }, 4000);
 }
+function displayTime(value) {
+  if (!value) return "—";
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString("zh-CN", { hour12: false });
+}
+
 
 async function api(path = "/api/admin", body) {
   const response = await fetch(path, {
@@ -211,7 +217,8 @@ function renderPurchases(purchases = []) {
     orderCell.style.fontSize = "12px";
 
     cell(row, `@${item.username} (${item.user_id})`);
-    cell(row, `${item.product_name} (${item.ldc_amount} LDC)`);
+    const prodLabel = item.product_name.includes(item.ldc_amount) ? item.product_name : `${item.product_name} (${item.ldc_amount} LDC)`;
+    cell(row, prodLabel);
 
     const ptsCell = cell(row, `-${item.points_cost} 分`);
     ptsCell.style.fontWeight = "600";
@@ -299,7 +306,7 @@ function render() {
     const row = document.createElement("tr");
     cell(row, `@${trigger.username} · ${trigger.user_id}`);
     cell(row, `第 ${trigger.group_no} 组`);
-    cell(row, trigger.created_at);
+    cell(row, displayTime(trigger.created_at));
     const flowCell = cell(row, trigger.flow_id ? trigger.flow_id.slice(0, 10) + "…" : "—");
     flowCell.style.fontFamily = "monospace";
     practiceBody.append(row);

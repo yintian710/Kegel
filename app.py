@@ -653,6 +653,8 @@ class AppHandler(SimpleHTTPRequestHandler):
                     rewards = [entry_view(row) for row in connection.execute("SELECT * FROM entries ORDER BY day DESC,rank LIMIT 500")]
                     wallets = [dict(row) for row in connection.execute("SELECT user_id,username,balance FROM points_wallets ORDER BY balance DESC,user_id LIMIT 500")]
                     triggers = [dict(row) for row in connection.execute("SELECT day,user_id,username,group_no,created_at,flow_id FROM practice_triggers ORDER BY id DESC LIMIT 200")]
+                    for item in triggers:
+                        item["created_at"] = iso_time(item["created_at"])
                     products = catalog.list_products(connection, today=state["day"], include_inactive=True)
                     purchases = catalog.all_purchases(connection, SITE_TZ)
                     result = {"ok": True, "settings": settings(connection), "status": state, "visits": visits, "rewards": rewards, "wallets": wallets, "practice_triggers": triggers, "products": products, "purchases": purchases}

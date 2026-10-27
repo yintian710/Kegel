@@ -680,16 +680,26 @@ button:disabled {
    ========================================================== */
 .admin-shell {
   display: flex;
-  min-height: 100vh;
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  height: 100svh;
+  overflow: hidden;
+  background: var(--bg);
 }
 .admin-sidebar {
   width: 240px;
+  height: 100%;
   background: #ffffff;
   border-right: 1px solid var(--border);
   padding: 24px 16px;
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+
 }
 .admin-sidebar-brand {
   display: flex;
@@ -725,9 +735,14 @@ button:disabled {
 }
 .admin-content {
   flex: 1;
-  padding: 32px 40px;
-  max-width: 1300px;
+  height: 100%;
+  padding: 32px 40px 100px;
+  max-width: 1400px;
   overflow-y: auto;
+  overflow-x: hidden;
+  min-width: 0;
+  scroll-behavior: smooth;
+
 }
 
 /* Admin Metric Stat Cards */
@@ -766,35 +781,50 @@ button:disabled {
 
 /* Modern Tables & Custom Scrollbars */
 .table-wrap {
-  max-height: 400px;
-  overflow-x: auto;
-  overflow-y: auto;
+  max-height: 280px;
+  overflow: auto;
   border-radius: var(--radius-sm);
   border: 1px solid var(--border);
   background: #ffffff;
-  scrollbar-width: thin;
-  scrollbar-color: #cbd5e1 transparent;
-  -webkit-overflow-scrolling: touch;
+  width: 100%;
 }
-.table-wrap::-webkit-scrollbar, .data-scroll-box::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
-}
-.table-wrap::-webkit-scrollbar-thumb, .data-scroll-box::-webkit-scrollbar-thumb {
-  background: #cbd5e1;
-  border-radius: 9999px;
-}
-.table-wrap::-webkit-scrollbar-track, .data-scroll-box::-webkit-scrollbar-track {
-  background: transparent;
-}
-
 .data-scroll-box {
   max-height: 640px;
   overflow-y: auto;
   overflow-x: hidden;
   padding-right: 4px;
-  scrollbar-width: thin;
-  scrollbar-color: #cbd5e1 transparent;
+}
+.table-wrap::-webkit-scrollbar,
+.data-scroll-box::-webkit-scrollbar,
+.admin-content::-webkit-scrollbar,
+.admin-sidebar::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+.table-wrap::-webkit-scrollbar-track,
+.data-scroll-box::-webkit-scrollbar-track,
+.admin-content::-webkit-scrollbar-track,
+.admin-sidebar::-webkit-scrollbar-track {
+  background: #f1f5f9;
+  border-radius: 5px;
+}
+.table-wrap::-webkit-scrollbar-thumb,
+.data-scroll-box::-webkit-scrollbar-thumb,
+.admin-content::-webkit-scrollbar-thumb,
+.admin-sidebar::-webkit-scrollbar-thumb {
+  background: #94a3b8;
+  border-radius: 5px;
+  border: 2px solid #f1f5f9;
+}
+.table-wrap::-webkit-scrollbar-thumb:hover,
+.data-scroll-box::-webkit-scrollbar-thumb:hover,
+.admin-content::-webkit-scrollbar-thumb:hover,
+.admin-sidebar::-webkit-scrollbar-thumb:hover {
+  background: #64748b;
+}
+.table-wrap::-webkit-scrollbar-corner,
+.data-scroll-box::-webkit-scrollbar-corner {
+  background: #f1f5f9;
 }
 
 .data-table {
@@ -960,13 +990,20 @@ button:disabled {
     -webkit-overflow-scrolling: touch;
   }
   .admin-shell {
+    position: static;
     flex-direction: column;
+    height: auto;
+    overflow: visible;
   }
   .admin-sidebar {
     width: 100%;
+    height: auto;
     border-right: none;
     border-bottom: 1px solid var(--border);
     padding: 16px;
+    position: sticky;
+    top: 0;
+    z-index: 50;
   }
   .admin-sidebar-brand {
     padding: 0 0 12px;
@@ -979,7 +1016,9 @@ button:disabled {
     padding-bottom: 6px;
   }
   .admin-content {
-    padding: 20px 14px;
+    height: auto;
+    padding: 20px 14px 60px;
+    overflow: visible;
   }
   #sec-products > div {
     grid-template-columns: 1fr !important;
