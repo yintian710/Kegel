@@ -174,13 +174,24 @@ def all_purchases(connection: sqlite3.Connection, tz: Any) -> list[dict]:
     return [purchase_view(row, tz) for row in rows]
 
 
+def daily_ldc_used(connection: sqlite3.Connection, today: str) -> Decimal:
+    row = connection.execute("""SELECT COALESCE(SUM(
+        CAST(ldc_amount AS INTEGER) * 100 +
+        CAST(substr(ldc_amount, instr(ldc_amount, '.') + 1) AS INTEGER)
+        ), 0) FROM shop_purchases
+        WHERE day=? AND status IN ('pending', 'success', 'simulated', 'uncertain')""", (today,)).fetchone()
+    return Decimal(row[0]) / 100
+
+
 def purchase_product(
     connection: sqlite3.Connection,
     user: dict,
     product_id: int,
     today: str,
     now: float,
-    dispatch_fn: Callable[[str, dict, str], tuple[str, str, str]]
+    dispatch_fn: Callable[[str, dict, str], tuple[str, str, str]],
+    *,
+    daily_ldc_limit: int,
 ) -> dict:
     """
     Executes a purchase of an LDC product with auto delivery.
@@ -215,6 +226,10 @@ def purchase_product(
         ).fetchone()[0]
         if user_bought >= user_daily_limit:
             raise ValueError(f"今日已达单人兑换限额（限额 {user_daily_limit} 份/天）")
+
+    remaining = max(Decimal(0), Decimal(daily_ldc_limit) - daily_ldc_used(connection, today))
+    if Decimal(ldc_amount) > remaining:
+        raise ValueError(f"今日全站 LDC 兑换额度不足：剩余 {remaining:.2f} LDC，本次兑换 {ldc_amount} LDC；不支持拆分兑换")
 
     order_no = f"SO-{today.replace('-', '')}-{secrets.token_hex(6).upper()}"
 

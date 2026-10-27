@@ -127,12 +127,13 @@ function renderLeaderboard() {
     rules.append(remaining);
   }
 
-  // Quota progress bar
+  // Daily LDC redemption quota progress bar
   const quota = state.status?.quota;
   if (quota) {
-    $("#quotaUsedText").textContent = `每日已用 ${quota.used} / ${quota.limit}`;
-    $("#quotaRemainingText").textContent = `剩余 ${quota.remaining}`;
-    const pct = quota.limit > 0 ? Math.min(100, Math.round((quota.used / quota.limit) * 100)) : 0;
+    $("#quotaUsedText").textContent = `今日已兑换 ${quota.used} / ${quota.limit} LDC`;
+    $("#quotaRemainingText").textContent = `剩余 ${quota.remaining} LDC`;
+    const limit = Number(quota.limit);
+    const pct = limit > 0 ? Math.min(100, Math.round((Number(quota.used) / limit) * 100)) : 0;
     $("#quotaBarFill").style.width = `${pct}%`;
   }
 
@@ -232,17 +233,10 @@ function renderResult() {
         pill.textContent = "打卡已记录";
         note.textContent = "已记录今日排名，本名次无站内积分奖励。";
       } else {
-        // Unclaimed
-        const quota = status?.quota;
-        const available = quota && entry.amount <= quota.remaining;
         button.hidden = false;
-        button.disabled = state.busy || !available;
-        button.textContent = state.busy ? "正在领取…" : available ? "领取站内积分" : quota?.remaining === 0 ? "今日额度已用完" : "剩余额度不足";
-        if (!available) {
-          note.textContent = quota?.remaining === 0
-            ? "今日全站积分额度已用完，当天不能再领取。"
-            : `今日剩余 ${quota?.remaining ?? 0} 分，当前奖励 ${entry.amount} 分；整笔额度不足，不能拆分领取。`;
-        }
+        button.disabled = state.busy;
+        button.textContent = state.busy ? "正在领取…" : "领取站内积分";
+        note.textContent = "签到积分领取不受每日 LDC 兑换额度限制。";
       }
     } else if (state.mode === "closed") {
       $("#completionTitle").innerHTML = '今日练习完成';
@@ -326,7 +320,7 @@ function render() {
         ? `今日打卡已开放 · ${status.total} 人完成`
         : `今日尚未开放 · 最晚 ${status.deadline} 北京时间开启`;
     if (status.quota) {
-      $("#openingNote").textContent += ` · 今日额度剩余 ${status.quota.remaining} 分`;
+      $("#openingNote").textContent += ` · 今日 LDC 兑换额度剩余 ${status.quota.remaining} LDC`;
     }
   }
 

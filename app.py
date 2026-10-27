@@ -62,10 +62,12 @@ APP_BASE_URL = os.environ.get("APP_BASE_URL", f"http://localhost:{PORT}").rstrip
 APP_SECRET = (os.environ.get("APP_SECRET") or secrets.token_urlsafe(48)).encode()
 ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN", "")
 TRIGGER_TOKEN = os.environ.get("CHECKIN_TRIGGER_TOKEN", "")
+DAILY_LDC_LIMIT = int(os.environ.get("DAILY_LDC_LIMIT", "800"))
+if not 0 <= DAILY_LDC_LIMIT <= 100_000_000:
+    raise ValueError("DAILY_LDC_LIMIT 须为 0–100000000 的整数 LDC")
 SITE_TZ = ZoneInfo("Asia/Shanghai")
 DEFAULT_SETTINGS = {
     "deadline": "22:00", "min_step_seconds": 8,
-    "daily_points_limit": 800,
     "reward_tiers": [{"through": 10, "amount": 1000},
                      {"through": 20, "amount": 500},
                      {"through": 50, "amount": 100}],
@@ -134,6 +136,7 @@ def init_db() -> None:
                 PRIMARY KEY(day,user_id), UNIQUE(day,rank)
             );
         """)
+        connection.execute("DELETE FROM checkin_settings WHERE key IN ('daily_points_limit', 'daily_ldc_limit')")
         credits.init_schema(connection)
         practice.init_schema(connection)
         catalog.init_schema(connection)
@@ -173,11 +176,6 @@ def validate_settings(body: dict[str, Any]) -> dict[str, Any]:
         if type(value) is not int or not 1 <= value <= 300:
             raise APIError("每组最短时长需为 1–300 秒整数")
         result["min_step_seconds"] = value
-    if "daily_points_limit" in body:
-        value = body["daily_points_limit"]
-        if type(value) is not int or not 0 <= value <= 100_000_000:
-            raise APIError("每日全站积分额度须为 0–100000000 的整数")
-        result["daily_points_limit"] = value
     if "reward_tiers" in body:
         tiers = body["reward_tiers"]
         if not isinstance(tiers, list) or not 1 <= len(tiers) <= 20:
@@ -300,11 +298,10 @@ def record_visit(connection, subject: str, username: str, visitor: str, ip: str,
         connection.execute("INSERT INTO reviews(day,user_id,reason) VALUES (?,?,?) ON CONFLICT(day,user_id) DO UPDATE SET reason=excluded.reason", (today, subject, reason))
 
 
-def quota_view(connection, today: str, limit: int | None = None) -> dict[str, int]:
-    if limit is None:
-        limit = settings(connection)["daily_points_limit"]
-    used = connection.execute("SELECT COALESCE(SUM(amount),0) FROM entries WHERE day=? AND reward_status='credited'", (today,)).fetchone()[0]
-    return {"limit": limit, "used": used, "remaining": max(0, limit - used)}
+def quota_view(connection, today: str) -> dict[str, str]:
+    limit = DAILY_LDC_LIMIT
+    used = catalog.daily_ldc_used(connection, today)
+    return {"limit": f"{limit:.2f}", "used": f"{used:.2f}", "remaining": f"{max(Decimal(0), Decimal(limit) - used):.2f}"}
 
 
 def status_view(connection, user: dict | None, now: float, subject: str = "") -> dict:
@@ -322,7 +319,7 @@ def status_view(connection, user: dict | None, now: float, subject: str = "") ->
             "opened_at": iso_time(day["opened_at"]), "open_reason": day["open_reason"],
             "deadline": config["deadline"], "timezone": "Asia/Shanghai", "min_step_seconds": config["min_step_seconds"],
             "reward_tiers": config["reward_tiers"], "wallet": credits.wallet_view(connection, identity) if user else None,
-            "quota": quota_view(connection, day["day"], config["daily_points_limit"]),
+            "quota": quota_view(connection, day["day"]),
             "oauth_ready": bool(os.environ.get("LINUXDO_CLIENT_ID") and os.environ.get("LINUXDO_CLIENT_SECRET")),
             "total": connection.execute("SELECT COUNT(*) FROM entries WHERE day=?", (day["day"],)).fetchone()[0],
             "entry": entry_view(entry), "session": session_view(session, now), "review": dict(review) if review else None,
@@ -602,7 +599,9 @@ class AppHandler(SimpleHTTPRequestHandler):
             try:
                 with db() as connection:
                     connection.execute("BEGIN IMMEDIATE")
-                    result = catalog.purchase_product(connection, user, product_id, day_key(), time.time(), dispatch_ldc)
+                    now = time.time()
+                    result = catalog.purchase_product(connection, user, product_id, day_key(now), now, dispatch_ldc,
+                                                      daily_ldc_limit=DAILY_LDC_LIMIT)
             except ValueError as exc:
                 raise APIError(str(exc), 400) from None
             self.json_response({"ok": True, **result})
@@ -680,11 +679,6 @@ class AppHandler(SimpleHTTPRequestHandler):
                 raise APIError("请先完成三组打卡", 409)
             if row["reward_status"] == "unclaimed":
                 practice.verify(connection, row["flow_id"], user["id"], today, row["completed_at"])
-                quota = quota_view(connection, today)
-                if quota["remaining"] == 0:
-                    raise APIError("今日全站积分额度已用完，当天不能再领取", 409)
-                if row["amount"] > quota["remaining"]:
-                    raise APIError(f"今日额度不足：剩余 {quota['remaining']} 分，本次奖励 {row['amount']} 分；不支持拆分领取", 409)
                 credits.credit_checkin(connection, user, row["amount"], f"{today}:{user['id']}", now)
                 connection.execute("UPDATE entries SET reward_status='credited',claimed_at=? WHERE day=? AND user_id=?", (now, today, user["id"]))
             row = connection.execute("SELECT * FROM entries WHERE day=? AND user_id=?", (today, user["id"])).fetchone()

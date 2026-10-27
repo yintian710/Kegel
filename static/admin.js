@@ -240,14 +240,12 @@ function render() {
 
   $("#metricDeadline").textContent = settings.deadline;
   $("#metricStepSeconds").textContent = `${settings.min_step_seconds} 秒`;
-  $("#metricQuota").textContent = `${settings.daily_points_limit} 分`;
-  $("#metricQuotaSub").textContent = `已用 ${status.quota.used} 分 · 剩余 ${status.quota.remaining} 分`;
+  $("#metricQuota").textContent = `${status.quota.limit} LDC`;
+  $("#metricQuotaSub").textContent = `已兑换 ${status.quota.used} LDC · 剩余 ${status.quota.remaining} LDC`;
 
   // Settings inputs
   $("#deadline").value = settings.deadline;
   $("#minStepSeconds").value = settings.min_step_seconds;
-  $("#dailyPointsLimit").value = settings.daily_points_limit;
-  $("#dailyQuotaStatus").textContent = `今日已发 ${status.quota.used} / ${status.quota.limit} 分 (剩余 ${status.quota.remaining} 分)`;
   $("#conditionUrl").value = settings.condition_url || "";
 
   // Rewards list
@@ -389,7 +387,6 @@ $("#settingsForm").addEventListener("submit", (event) => {
     ...state.data.settings,
     deadline: $("#deadline").value,
     min_step_seconds: Number($("#minStepSeconds").value),
-    daily_points_limit: Number($("#dailyPointsLimit").value),
     condition_url: $("#conditionUrl").value.trim(),
   }, "基础规则已更新。");
 });

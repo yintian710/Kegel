@@ -46,7 +46,10 @@ class CheckinBehavior(unittest.TestCase):
         self.clock = patch.object(app.time, "time", return_value=self.now)
         self.clock.start()
         self.addCleanup(self.clock.stop)
-        self.request("/api/admin/settings", {"deadline": "22:00", "min_step_seconds": 1, "daily_points_limit": 100000000}, admin=True)
+        self.quota_config = patch.object(app, "DAILY_LDC_LIMIT", 800)
+        self.quota_config.start()
+        self.addCleanup(self.quota_config.stop)
+        self.request("/api/admin/settings", {"deadline": "22:00", "min_step_seconds": 1}, admin=True)
 
     def request(self, path, body=None, user=None, admin=False, headers=None):
         request_headers = {"Content-Type": "application/json"}
@@ -229,7 +232,7 @@ class CheckinBehavior(unittest.TestCase):
             self.assertEqual((fresh["total"], fresh["wallet"]["balance"]), (0, 1000))
             self.assertIsNone(fresh["entry"])
             self.assertFalse(fresh["is_open"])
-            self.assertEqual(fresh["quota"]["used"], 0)
+            self.assertEqual(fresh["quota"]["used"], "0.00")
             self.assertEqual(fresh["quota"]["remaining"], fresh["quota"]["limit"])
             self.assertEqual(self.request("/api/session/step", {"token": old["session"]["token"]}, user=1)[0], 409)
             self.open()
@@ -246,8 +249,7 @@ class CheckinBehavior(unittest.TestCase):
         self.assertEqual(self.request("/api/admin", admin=True)[1]["settings"]["deadline"], "22:00")
         self.assertEqual(self.request("/api/admin/settings", {"min_step_seconds": 0}, admin=True)[0], 400)
         self.assertEqual(self.request("/api/admin/settings", {"condition_url": "file:///etc/passwd"}, admin=True)[0], 400)
-        for limit in [-1, 0.5, True, 100000001]:
-            self.assertEqual(self.request("/api/admin/settings", {"daily_points_limit": limit}, admin=True)[0], 400)
+        self.assertEqual(self.request("/api/admin/settings", {"daily_ldc_limit": 900}, admin=True)[0], 400)
 
     def test_condition_scheduler_opens_only_for_true_condition(self):
         self.request("/api/admin/settings", {"condition_url": "http://condition.example/open"}, admin=True)
@@ -260,46 +262,85 @@ class CheckinBehavior(unittest.TestCase):
                 app.scheduler(stop)
             self.assertEqual(self.request("/api/status")[1]["is_open"], response["open"] is True)
 
-    def test_oversize_reward_rejected_whole_and_admin_can_raise_limit(self):
-        self.request("/api/admin/settings", {"daily_points_limit": 800}, admin=True)
+    def test_checkin_rewards_do_not_consume_or_require_ldc_quota(self):
         self.open()
         self.complete(1)
-        code, result = self.request("/api/claim", {}, user=1)
-        self.assertEqual(code, 409)
-        self.assertIn("不支持拆分", result["error"])
-        state = self.request("/api/status", user=1)[1]
-        self.assertEqual(state["quota"], {"limit": 800, "used": 0, "remaining": 800})
-        self.assertEqual((state["entry"]["reward_status"], state["wallet"]["balance"]), ("unclaimed", 0))
-        self.assertEqual(self.request("/api/shop", user=1)[1]["ledger"], [])
-        self.request("/api/admin/settings", {"daily_points_limit": 1000}, admin=True)
         code, result = self.request("/api/claim", {}, user=1)
         self.assertEqual(code, 200)
         self.assertEqual(result["wallet"]["balance"], 1000)
-        self.assertEqual(result["quota"]["remaining"], 0)
-        self.request("/api/admin/settings", {"daily_points_limit": 0}, admin=True)
-        self.assertEqual(self.request("/api/claim", {}, user=1)[1]["wallet"]["balance"], 1000)
-
-    def test_concurrent_claims_cannot_exceed_site_daily_budget(self):
-        self.request("/api/admin/settings", {"daily_points_limit": 800, "reward_tiers": [{"through": 50, "amount": 500}]}, admin=True)
-        self.open()
-        self.complete(1)
+        self.assertEqual(result["quota"], {"limit": "800.00", "used": "0.00", "remaining": "800.00"})
+        app.DAILY_LDC_LIMIT = 0
         self.complete(2)
-        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
-            results = list(pool.map(lambda user: self.request("/api/claim", {}, user=user), [1, 2]))
-        self.assertEqual(sorted(code for code, _ in results), [200, 409])
-        state = self.request("/api/status")[1]
-        self.assertEqual(state["quota"], {"limit": 800, "used": 500, "remaining": 300})
-        self.assertEqual(sum(self.request("/api/shop", user=user)[1]["wallet"]["balance"] for user in [1, 2]), 500)
-        self.request("/api/admin/settings", {"reward_tiers": [{"through": 50, "amount": 300}]}, admin=True)
-        self.complete(3)
-        code, result = self.request("/api/claim", {}, user=3)
+        code, result = self.request("/api/claim", {}, user=2)
         self.assertEqual(code, 200)
-        self.assertEqual(result["quota"], {"limit": 800, "used": 800, "remaining": 0})
-        self.complete(4)
-        code, result = self.request("/api/claim", {}, user=4)
-        self.assertEqual(code, 409)
-        self.assertIn("已用完", result["error"])
-        self.assertEqual(self.request("/api/shop", user=4)[1]["wallet"]["balance"], 0)
+        self.assertEqual(result["wallet"]["balance"], 1000)
+        self.assertEqual(result["quota"], {"limit": "0.00", "used": "0.00", "remaining": "0.00"})
+
+    def quota_product(self, amount):
+        code, result = self.request("/api/admin/products", {
+            "category": "LDC", "name": f"{amount} LDC", "description": "",
+            "points_price": 100, "ldc_amount": amount, "user_daily_limit": 0,
+            "total_daily_limit": 0, "is_active": True,
+        }, admin=True)
+        self.assertEqual(code, 200, result)
+        return result["product"]["id"]
+
+    def seed_wallet(self, user):
+        with app.db() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            credits.credit_checkin(connection, {"id": str(user), "username": f"user{user}"}, 1000, f"seed:{user}", self.now)
+
+    def test_concurrent_redemptions_enforce_global_ldc_budget_across_products(self):
+        first, second = self.quota_product("500.00"), self.quota_product("500.00")
+        for user in (1, 2, 3):
+            self.seed_wallet(user)
+        with patch.object(app, "dispatch_ldc", return_value=("success", "trade", "")) as dispatch:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+                results = list(pool.map(lambda item: self.request("/api/shop/purchase", {"product_id": item[1]}, user=item[0]), [(1, first), (2, second)]))
+            self.assertEqual(sorted(code for code, _ in results), [200, 400])
+            self.assertEqual(dispatch.call_count, 1)
+        self.assertEqual(self.request("/api/shop")[1]["quota"], {"limit": "800.00", "used": "500.00", "remaining": "300.00"})
+        self.assertEqual(sum(self.request("/api/shop", user=user)[1]["wallet"]["balance"] for user in (1, 2)), 1900)
+        last = self.quota_product("300.00")
+        with patch.object(app, "dispatch_ldc", return_value=("success", "last", "")):
+            self.assertEqual(self.request("/api/shop/purchase", {"product_id": last}, user=3)[0], 200)
+        self.assertEqual(self.request("/api/shop")[1]["quota"], {"limit": "800.00", "used": "800.00", "remaining": "0.00"})
+        self.assertEqual(self.request("/api/shop/purchase", {"product_id": last}, user=3)[0], 400)
+
+    def test_ldc_quota_exact_cents_failure_uncertainty_and_next_day(self):
+        app.DAILY_LDC_LIMIT = 1
+        self.seed_wallet(1)
+        small, rest = self.quota_product("0.10"), self.quota_product("0.90")
+        for status, expected_used, expected_balance in [("failed", "0.00", 1000), ("uncertain", "0.10", 900), ("simulated", "0.20", 800)]:
+            with patch.object(app, "dispatch_ldc", return_value=(status, "trade", "error")):
+                code, result = self.request("/api/shop/purchase", {"product_id": small}, user=1)
+            self.assertEqual((code, result["status"]), (200, status))
+            shop = self.request("/api/shop", user=1)[1]
+            self.assertEqual(shop["quota"]["used"], expected_used)
+            self.assertEqual(shop["wallet"]["balance"], expected_balance)
+        with patch.object(app, "dispatch_ldc") as dispatch:
+            self.assertEqual(self.request("/api/shop/purchase", {"product_id": rest}, user=1)[0], 400)
+            dispatch.assert_not_called()
+        final = self.quota_product("0.80")
+        with patch.object(app, "dispatch_ldc", return_value=("success", "trade", "")):
+            self.assertEqual(self.request("/api/shop/purchase", {"product_id": final}, user=1)[0], 200)
+        self.assertEqual(self.request("/api/shop")[1]["quota"], {"limit": "1.00", "used": "1.00", "remaining": "0.00"})
+        with patch.object(app.time, "time", return_value=self.now + 86400):
+            self.assertEqual(self.request("/api/shop")[1]["quota"], {"limit": "1.00", "used": "0.00", "remaining": "1.00"})
+        app.DAILY_LDC_LIMIT = 0
+        with patch.object(app, "dispatch_ldc") as dispatch:
+            self.assertEqual(self.request("/api/shop/purchase", {"product_id": small}, user=1)[0], 400)
+            dispatch.assert_not_called()
+
+    def test_environment_budget_overrides_obsolete_database_settings(self):
+        with app.db() as connection:
+            connection.execute("INSERT INTO checkin_settings(key,value) VALUES ('daily_points_limit','900')")
+            connection.execute("INSERT INTO checkin_settings(key,value) VALUES ('daily_ldc_limit','700')")
+        app.init_db()
+        with app.db() as connection:
+            self.assertNotIn("daily_points_limit", app.settings(connection))
+            self.assertNotIn("daily_ldc_limit", app.settings(connection))
+        self.assertEqual(self.request("/api/shop")[1]["quota"]["limit"], "800.00")
 
     def test_each_trigger_is_recorded_and_claim_requires_qualified_intervals(self):
         self.open()

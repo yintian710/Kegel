@@ -34,10 +34,11 @@ python3 app.py
 | `LDC_DONATION_ENABLED` | 默认 `false`；开启并配置商户凭据后允许创建真实 LDC 赞助订单。 |
 | `LDC_API_BASE` | 官方商户网关，默认 `https://credit.linux.do`。 |
 | `LDC_CLIENT_ID` / `LDC_CLIENT_SECRET` | Credit 商户 API Key，用于赞助订单签名及支付通知验签。 |
+| `DAILY_LDC_LIMIT` | 全站每日 LDC 兑换额度，整数 LDC，默认 `800`；`0` 停止兑换但不影响签到积分。修改后需重启服务生效。 |
 | `CHECKIN_TRIGGER_TOKEN` | 外部开放触发接口 `X-Trigger-Token` 口令；不设置则不能使用该入口。 |
 | `CHECKIN_CONDITION_TOKEN` | 可选条件接口请求的 Bearer 令牌；仅发给配置的 `condition_url`。 |
 
-凭据仅由环境变量配置。每日截止时间、步骤间隔、奖励区间、全站每日积分额度与 `condition_url` 通过管理页或管理 API 保存到数据库。每日奖励为本地整数站内积分入账，无需任何支付凭据。LDC 赞助与站内积分独立，不提供充值、购买或兑换比例配置。
+凭据与全站每日 LDC 兑换额度由环境变量配置；每日截止时间、步骤间隔、奖励区间与 `condition_url` 通过管理页或管理 API 保存到数据库。每日奖励为本地整数站内积分入账，无需任何支付凭据。LDC 赞助与站内积分独立，不提供充值或购买比例配置。
 
 ## 每日规则与开放方式
 
@@ -47,9 +48,9 @@ python3 app.py
 
 从每次触发开始计算，**达到十分钟仍未进入下一组，本轮失效并回到第一组**；下一次点击创建新的一轮，旧触发记录保留。每次有效进入下一组会重新计算十分钟，刷新页面可恢复尚未失效的进度。没有新规则所需完整触发记录的旧进行中练习需要重新开始。
 
-全站每日积分额度 `daily_points_limit` 默认 **800 分**，按北京时间每天重置，以当天实际领取入账的总积分计算；打卡完成但未领取不占额度。单笔奖励大于剩余额度时整笔拒绝，不拆分，也不会增加余额或写入流水。额度耗尽后当天停止领取。额度校验与余额、流水、领取状态在同一写事务内提交，并发请求不会超发。设置为 `0` 可停止领取；修改额度不撤回已经入账的积分。
+全站每日 LDC 兑换额度由环境变量 `DAILY_LDC_LIMIT` 配置为整数 LDC，默认 **800 LDC**，修改后需重启服务生效。额度按北京时间每天重置，并按商品的精确 `ldc_amount` 金额累计；`pending`、`success`、`simulated` 和 `uncertain` 订单占用额度，`failed` 订单释放额度。统计与接口展示均使用两位小数字符串。单笔商品的 LDC 金额大于剩余额度时整笔拒绝。设置为 `0` 会停止 LDC 兑换，但不影响打卡、签到积分领取或钱包入账。
 
-默认首档奖励 **1000 分大于每日额度 800 分**，因此第 1–10 名在默认额度下不能领取；这是整笔不足则拒绝规则的直接结果。管理员可调整奖励或每日额度，已完成打卡的奖励数值保持不变。
+签到奖励不受 LDC 兑换额度限制；例如默认首档的 1000 站内积分可正常领取，即使当日 LDC 兑换额度为 0。
 
 管理 API 使用 `X-Admin-Token`，请求体为 JSON。以下示例假定已在 shell 中设置对应口令：
 
@@ -63,7 +64,7 @@ curl -X POST http://localhost:8000/api/admin/open \
 curl -X POST http://localhost:8000/api/admin/settings \
   -H "X-Admin-Token: $ADMIN_TOKEN" \
   -H 'Content-Type: application/json' \
-  -d '{"deadline":"22:00","min_step_seconds":8,"daily_points_limit":800,"reward_tiers":[{"through":10,"amount":1000},{"through":20,"amount":500},{"through":50,"amount":100}],"condition_url":"https://your-service.example/checkin-condition"}'
+  -d '{"deadline":"22:00","min_step_seconds":8,"reward_tiers":[{"through":10,"amount":1000},{"through":20,"amount":500},{"through":50,"amount":100}],"condition_url":"https://your-service.example/checkin-condition"}'
 
 # 定时任务或外部服务触发今天开放
 curl -X POST http://localhost:8000/api/trigger/open \
@@ -91,6 +92,7 @@ curl -X POST http://localhost:8000/api/admin/review \
 - **积分与商店 (`/shop`)**：每日打卡奖励为整数站内积分，领取后计入个人钱包。商店展示当前积分余额、积分入账流水、LDC 商品兑换卡片，以及用户的兑换发货记录。
   - **品类与配置**：商品品类固定为 `LDC`。后台新建或编辑商品时，选择品类、输入积分售价、发货 LDC 数量、单人每日限购数及全站每日总限购数（0 为不限）。
   - **购买自动发货**：用户点击「立即兑换」确认后，系统在写事务内扣减站内积分并调用 Linux DO Credit 官方商户接口 (`POST /lpay/distribute`) 自动转账至用户的 Linux DO 账户。发货成功更新订单流水；发货失败自动全额退还扣减的积分；网络超时记录待核对状态。未配置商户凭据时安全运行于模拟发货模式。
+  - **每日兑换额度**：商品按 `ldc_amount` 精确金额占用全站额度；处理中、成功、模拟和待核对订单占额，失败订单释放额度。额度按北京时间每日重置，设为 `0` 仅停止兑换。
 - **独立赞助 (`/donate`)**：支持使用 LINUX DO Connect 登录身份发起 LDC 赞助订单，填写金额后跳转官方 LDC 支付平台。赞助**不会增加站内积分**。生产环境配置 `LDC_DONATION_ENABLED=true`、商户 `LDC_CLIENT_ID` / `LDC_CLIENT_SECRET` 和公网 HTTPS `APP_BASE_URL`。异步通知地址为 `<APP_BASE_URL>/payments/ldc/notify`。
 - **赞助榜**：页面公开展示已确认到账的 LDC 赞助榜（按累计赞助金额排序，显示排名、用户名、总额及次数），登录用户可查看自己的赞助订单。只有服务端通过 MD5 验签及订单对账后才会计入榜单，重复通知不会重复累计，浏览器跳转回页面不会确认到账。
 ## 部署边界

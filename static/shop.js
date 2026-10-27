@@ -39,6 +39,7 @@ function renderProducts(products = []) {
 
   const user = state.data?.user;
   const balance = user && state.data?.wallet ? Number(state.data.wallet.balance) : 0;
+  const quotaRemaining = Number(state.data?.quota?.remaining ?? 0);
 
   for (const item of products) {
     const card = document.createElement("article");
@@ -118,6 +119,9 @@ function renderProducts(products = []) {
     if (!user) {
       buyBtn.textContent = "登录后兑换";
       buyBtn.onclick = () => window.location.assign("/auth/linuxdo/start?next=/shop");
+    } else if (Number(item.ldc_amount) > quotaRemaining) {
+      buyBtn.textContent = quotaRemaining <= 0 ? "今日兑换已停止" : "LDC 额度不足";
+      buyBtn.disabled = true;
     } else if (item.user_daily_limit > 0 && item.user_remaining <= 0) {
       buyBtn.textContent = "今日已达限购";
       buyBtn.disabled = true;
@@ -281,7 +285,7 @@ function render() {
     : "登录后即可使用站内积分兑换 LDC 并自动发货。";
 
   if (quota) {
-    $("#quotaSummary").textContent = `今日全站已发打卡奖励 ${quota.used} / ${quota.limit} 分 (剩余 ${quota.remaining} 分)`;
+    $("#quotaSummary").textContent = `今日全站 LDC 兑换额度：已用 ${quota.used} / ${quota.limit} LDC（剩余 ${quota.remaining} LDC）`;
   }
 
   renderProducts(products);
