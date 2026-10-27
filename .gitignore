@@ -15,6 +15,7 @@
 *.db.bak
 *.sqlite.bak
 *.sqlite3.bak
+*.payments.jsonl
 
 # Python 缓存与本地环境
 __pycache__/

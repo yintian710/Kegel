@@ -317,14 +317,23 @@ $("#purchaseForm").addEventListener("submit", async (event) => {
   submitBtn.textContent = "正在扣减积分并自动发货…";
 
   try {
+    const requestKey = `ldc-purchase:${state.data.user.id}:${state.selectedProduct.id}`;
+    let requestId = sessionStorage.getItem(requestKey);
+    if (!requestId) {
+      requestId = crypto.randomUUID();
+      sessionStorage.setItem(requestKey, requestId);
+    }
     const response = await fetch("/api/shop/purchase", {
       method: "POST",
       credentials: "same-origin",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ product_id: state.selectedProduct.id })
+      body: JSON.stringify({ product_id: state.selectedProduct.id, request_id: requestId })
     });
     const data = await response.json().catch(() => { throw new Error("服务器响应无法解析"); });
     if (!response.ok || data.ok === false) throw new Error(data.error || `兑换失败 (${response.status})`);
+    if (data.status !== "pending" && data.status !== "uncertain") {
+      sessionStorage.removeItem(requestKey);
+    }
 
     $("#purchaseDialog").close();
     if (data.status === "success" || data.status === "simulated") {

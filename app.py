@@ -7,6 +7,7 @@ import json
 import os
 import re
 import secrets
+import sys
 import sqlite3
 import threading
 import time
@@ -74,6 +75,57 @@ DEFAULT_SETTINGS = {
                      {"through": 50, "amount": 100}],
     "condition_url": "",
 }
+
+_PAYMENT_LOG_LOCK = threading.Lock()
+_PAYMENT_SECRET_FIELDS = {
+    "authorization", "proxy-authorization", "cookie", "set-cookie", "sign", "key",
+    "client_secret", "access_token", "refresh_token", "id_token", "secret", "token",
+    "x-admin-token", "x-trigger-token",
+}
+
+
+def _redact_payment_log(value):
+    if isinstance(value, dict):
+        return {key: "[REDACTED]" if str(key).lower() in _PAYMENT_SECRET_FIELDS else _redact_payment_log(item)
+                for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_redact_payment_log(item) for item in value]
+    if isinstance(value, str):
+        if "?" in value and (value.startswith("/") or value.startswith(("http://", "https://"))):
+            try:
+                parsed = urllib.parse.urlsplit(value)
+                query = [(key, "[REDACTED]" if key.lower() in _PAYMENT_SECRET_FIELDS else _redact_payment_log(item))
+                         for key, item in urllib.parse.parse_qsl(parsed.query, keep_blank_values=True)]
+                value = urllib.parse.urlunsplit(parsed._replace(query=urllib.parse.urlencode(query)))
+            except ValueError:
+                pass
+        fields = "|".join(re.escape(key) for key in _PAYMENT_SECRET_FIELDS)
+        value = re.sub(
+            rf'''(?i)((?<![\w-])["']?(?:{fields})["']?\s*[:=]\s*)(?:"[^"\r\n]*"|'[^'\r\n]*'|[^&\s,}}]+)''',
+            lambda match: match[1] + '"[REDACTED]"', value,
+        )
+        value = re.sub(r"(https?://)[^/@\s]+@", r"\1[REDACTED]@", value)
+        for name in ("LDC_CLIENT_SECRET", "LINUXDO_CLIENT_SECRET", "APP_SECRET", "ADMIN_TOKEN",
+                     "CHECKIN_TRIGGER_TOKEN", "CHECKIN_CONDITION_TOKEN"):
+            secret = os.environ.get(name, "")
+            if secret:
+                value = value.replace(secret, "[REDACTED]")
+    return value
+
+
+def payment_log(event: str, **details) -> None:
+    """Append independently of business transactions; logging failures never undo a transfer."""
+    record = {"time": datetime.now(SITE_TZ).isoformat(), "event": event, **_redact_payment_log(details)}
+    line = json.dumps(record, ensure_ascii=False) + "\n"
+    path = Path(os.environ.get("PAYMENT_LOG_PATH") or DB_PATH.with_suffix(".payments.jsonl"))
+    try:
+        with _PAYMENT_LOG_LOCK:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+            with os.fdopen(descriptor, "a", encoding="utf-8", errors="backslashreplace") as stream:
+                stream.write(line)
+    except OSError as exc:
+        print(f"支付日志写入失败 ({type(exc).__name__})，转存标准错误：{line}", file=sys.stderr, flush=True)
 
 
 class APIError(Exception):
@@ -231,11 +283,33 @@ def json_request(url: str, *, method: str = "GET", data=None, headers=None, form
         body = urllib.parse.urlencode(data).encode() if form else json.dumps(data).encode()
         request_headers["Content-Type"] = "application/x-www-form-urlencoded" if form else "application/json"
     request = urllib.request.Request(url, data=body, headers=request_headers, method=method)
-    with urllib.request.urlopen(request, timeout=timeout) as response:
-        result = json.loads(response.read(1_000_001))
-    if not isinstance(result, dict):
-        raise ValueError("远端响应不是 JSON 对象")
-    return result
+    exchange_id = secrets.token_hex(12)
+    audit = urllib.parse.urlsplit(url).path.startswith(("/lpay/", "/epay/"))
+    if audit:
+        payment_log("outbound.request", exchange_id=exchange_id, method=method, url=url,
+                    headers=request_headers, body=body.decode("utf-8", errors="replace") if body else "")
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            raw = response.read() if audit else response.read(1_000_001)
+            if audit:
+                payment_log("outbound.response", exchange_id=exchange_id, status=response.status,
+                            headers={key: response.headers.get_all(key) for key in response.headers.keys()},
+                            body=raw.decode("utf-8", errors="replace"))
+        result = json.loads(raw)
+        if not isinstance(result, dict):
+            raise ValueError("远端响应不是 JSON 对象")
+        return result
+    except urllib.error.HTTPError as exc:
+        if audit:
+            with exc:
+                payment_log("outbound.response", exchange_id=exchange_id, status=exc.code,
+                            headers={key: exc.headers.get_all(key) for key in exc.headers.keys()},
+                            body=exc.read().decode("utf-8", errors="replace"))
+        raise
+    except Exception as exc:
+        if audit:
+            payment_log("outbound.error", exchange_id=exchange_id, error_type=type(exc).__name__, error=str(exc))
+        raise
 
 
 def b64encode(value: bytes) -> str:
@@ -351,14 +425,16 @@ def dispatch_ldc(order_no: str, user: dict, amount: str) -> tuple[str, str, str]
             },
             timeout=10
         )
-        if response.get("code") == 1:
-            trade_no = str((response.get("data") or {}).get("trade_no") or "")
-            if not trade_no:
-                return ("uncertain", "", "分发成功但缺少交易单号，需核对")
+        data = response.get("data") or {}
+        trade_no = str(data.get("trade_no") or "").strip()
+        if trade_no:
             return ("success", trade_no, "")
-        else:
-            err = str(response.get("error_msg") or response.get("msg") or "LDC 平台拒绝分发")
+        if response.get("code") == 1:
+            return ("uncertain", "", "分发成功但缺少交易单号，需核对")
+        err = str(response.get("error_msg") or response.get("message") or response.get("msg") or "").strip()
+        if err:
             return ("failed", "", err)
+        return ("uncertain", "", "分发响应缺少交易单号及明确错误，需核对")
     except Exception as exc:
         return ("uncertain", "", f"请求超时或网络异常: {type(exc).__name__}")
 
@@ -373,8 +449,21 @@ class CheckinServer(ThreadingHTTPServer):
 class AppHandler(SimpleHTTPRequestHandler):
     server_version = "Checkin/1.0"
 
+    def start_payment_log(self):
+        self.payment_log_id = None
+        self.payment_response_body = ""
+        path = urllib.parse.urlsplit(self.path).path
+        if path in {"/api/shop", "/api/shop/purchase", "/api/donations/create", "/api/donations", "/payments/ldc/notify"}:
+            self.payment_log_id = secrets.token_hex(12)
+            payment_log("inbound.request", exchange_id=self.payment_log_id, method=self.command,
+                        url=self.path, headers={key: self.headers.get_all(key) for key in self.headers.keys()})
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=str(STATIC_DIR), **kwargs)
+
+    def log_request(self, code="-", size="-"):
+        request_line = f"{self.command} {_redact_payment_log(self.path)} {self.request_version}"
+        self.log_message('"%s" %s %s', request_line, str(code), str(size))
 
     def end_headers(self):
         self.send_header("X-Content-Type-Options", "nosniff")
@@ -384,10 +473,19 @@ class AppHandler(SimpleHTTPRequestHandler):
         if getattr(self, "session_user", None) and urllib.parse.urlsplit(self.path).path != "/auth/logout":
             session = sign_payload({"purpose": "session", **self.session_user, "exp": time.time() + LOGIN_SESSION_SECONDS})
             self.send_header("Set-Cookie", self.cookie("linuxdo_session", session, LOGIN_SESSION_SECONDS))
+        if getattr(self, "payment_log_id", None):
+            headers = {}
+            for line in self._headers_buffer[1:]:
+                key, _, value = line.decode("latin-1").partition(":")
+                headers.setdefault(key.strip(), []).append(value.strip())
+            payment_log("inbound.response", exchange_id=self.payment_log_id,
+                        status=self._headers_buffer[0].decode("latin-1").strip(),
+                        headers=headers, body=self.payment_response_body)
         super().end_headers()
 
     def json_response(self, value, status=200):
         body = json.dumps(value, ensure_ascii=False).encode()
+        self.payment_response_body = body.decode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
@@ -446,6 +544,7 @@ class AppHandler(SimpleHTTPRequestHandler):
         record_visit(connection, subject, user["username"] if user else "匿名访客", visitor, self.client_address[0], kind, now)
 
     def do_GET(self):
+        self.start_payment_log()
         parsed = urllib.parse.urlsplit(self.path)
         try:
             if os.environ.get("LINUXDO_CLIENT_ID") and os.environ.get("LINUXDO_CLIENT_SECRET"):
@@ -518,8 +617,17 @@ class AppHandler(SimpleHTTPRequestHandler):
                         connection.execute("BEGIN IMMEDIATE")
                         donations.accept_notification(connection, {key: values[0] for key, values in query.items()}, time.time())
                     body, status = b"success", 200
-                except ValueError:
+                except ValueError as exc:
+                    payment_log("callback.rejected", exchange_id=self.payment_log_id, reason=str(exc))
                     body, status = b"fail", 400
+                except Exception as exc:
+                    payment_log("callback.error", exchange_id=self.payment_log_id,
+                                error_type=type(exc).__name__, reason=str(exc))
+                    raise
+                else:
+                    payment_log("callback.accepted", exchange_id=self.payment_log_id,
+                                out_trade_no=query.get("out_trade_no"), trade_no=query.get("trade_no"))
+                self.payment_response_body = body.decode("utf-8")
                 self.send_response(status)
                 self.send_header("Content-Type", "text/plain; charset=utf-8")
                 self.send_header("Content-Length", str(len(body)))
@@ -546,6 +654,7 @@ class AppHandler(SimpleHTTPRequestHandler):
             self.json_response({"ok": False, "error": "认证服务暂不可用，请重新登录"}, 502)
 
     def do_POST(self):
+        self.start_payment_log()
         try:
             origin = self.headers.get("Origin")
             if origin and origin != APP_BASE_URL:
@@ -553,7 +662,11 @@ class AppHandler(SimpleHTTPRequestHandler):
             length = int(self.headers.get("Content-Length", "0"))
             if not 0 <= length <= 65536:
                 raise APIError("请求体过大", 413)
-            body = json.loads(self.rfile.read(length) or b"{}")
+            raw_body = self.rfile.read(length)
+            if self.payment_log_id:
+                payment_log("inbound.body", exchange_id=self.payment_log_id,
+                            body=raw_body.decode("utf-8", errors="replace"))
+            body = json.loads(raw_body or b"{}")
             if not isinstance(body, dict):
                 raise APIError("请求体需为 JSON 对象")
             if os.environ.get("LINUXDO_CLIENT_ID") and os.environ.get("LINUXDO_CLIENT_SECRET"):
@@ -618,7 +731,7 @@ class AppHandler(SimpleHTTPRequestHandler):
                     connection.execute("BEGIN IMMEDIATE")
                     now = time.time()
                     result = catalog.purchase_product(connection, user, product_id, day_key(now), now, dispatch_ldc,
-                                                      daily_ldc_limit=DAILY_LDC_LIMIT)
+                                                      daily_ldc_limit=DAILY_LDC_LIMIT, request_id=body.get("request_id"))
             except ValueError as exc:
                 raise APIError(str(exc), 400) from None
             self.json_response({"ok": True, **result})

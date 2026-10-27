@@ -39,7 +39,8 @@ class CheckinBehavior(unittest.TestCase):
         self.config.start()
         self.addCleanup(self.config.stop)
         self.environment = patch.dict(os.environ, {"LDC_DONATION_ENABLED": "false", "LDC_CLIENT_ID": "", "LDC_CLIENT_SECRET": "",
-                                                   "LINUXDO_CLIENT_ID": "", "LINUXDO_CLIENT_SECRET": ""})
+                                                   "LINUXDO_CLIENT_ID": "", "LINUXDO_CLIENT_SECRET": "",
+                                                   "PAYMENT_LOG_PATH": str(Path(self.temp.name) / "payments.jsonl")})
         self.environment.start()
         self.addCleanup(self.environment.stop)
         app.init_db()
@@ -258,6 +259,17 @@ class CheckinBehavior(unittest.TestCase):
             self.assertEqual((shop["wallet"]["balance"], shop["ledger"]), (0, []))
             self.assertEqual(self.request("/api/donations", user=2)[1]["donation_orders"], [])
         self.assertEqual(self.request("/api/claim", {}, user=1)[0], 409)
+        records = [json.loads(line) for line in Path(os.environ["PAYMENT_LOG_PATH"]).read_text(encoding="utf-8").splitlines()]
+        self.assertEqual(len([row for row in records if row["event"] == "callback.accepted"]), 2)
+        rejected = next(row for row in records if row["event"] == "callback.rejected")
+        self.assertEqual(rejected["reason"], "重复的通知字段")
+        reply = next(row for row in records if row["event"] == "inbound.response" and row["exchange_id"] == rejected["exchange_id"])
+        self.assertEqual(reply["body"], "fail")
+        text = Path(os.environ["PAYMENT_LOG_PATH"]).read_text(encoding="utf-8")
+        self.assertIn(order["order_no"], text)
+        self.assertIn("HTTP-TRADE-1", text)
+        self.assertNotIn(notify["sign"], text)
+        self.assertNotIn("test-secret", text)
 
     def test_periodic_visits_require_review_then_approval(self):
         self.open()
@@ -586,6 +598,158 @@ class CheckinBehavior(unittest.TestCase):
         self.assertEqual(code, 400)
         self.assertIn("余额不足", err["error"])
 
+
+    def test_distribute_without_code_preserves_trade_and_does_not_refund(self):
+        calls = []
+
+        class LDCHandler(app.SimpleHTTPRequestHandler):
+            def log_message(self, *_args):
+                pass
+
+            def do_POST(self):
+                payload = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+                calls.append((self.path, payload))
+                body = json.dumps({"error_msg": "", "data": {
+                    "out_trade_no": payload["out_trade_no"], "trade_no": "119693406501863424",
+                }}).encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+        upstream = app.CheckinServer(("127.0.0.1", 0), LDCHandler)
+        worker = threading.Thread(target=upstream.serve_forever, daemon=True)
+        worker.start()
+        try:
+            self.seed_wallet(1)
+            pid = self.quota_product("1.00")
+            request = {"product_id": pid, "request_id": "same-purchase-request-1"}
+            with patch.dict(os.environ, {"LDC_LIVE": "true", "LDC_CLIENT_ID": "client",
+                                        "LDC_CLIENT_SECRET": "secret",
+                                        "LDC_API_BASE": f"http://127.0.0.1:{upstream.server_port}"}):
+                with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+                    results = list(pool.map(lambda _: self.request("/api/shop/purchase", request, user=1), range(2)))
+                replay = self.request("/api/shop/purchase", request, user=1)
+            for code, result in [*results, replay]:
+                self.assertEqual(code, 200, result)
+                self.assertEqual(result["status"], "success")
+                self.assertEqual(result["order"]["trade_no"], "119693406501863424")
+                self.assertEqual(result["order"]["order_no"], results[0][1]["order"]["order_no"])
+            self.assertEqual(len(calls), 1)
+            self.assertEqual(calls[0][0], "/lpay/distribute")
+            self.assertEqual(calls[0][1]["out_trade_no"], replay[1]["order"]["order_no"])
+            shop = self.request("/api/shop", user=1)[1]
+            self.assertEqual(shop["wallet"]["balance"], 900)
+            self.assertEqual(shop["quota"]["used"], "1.00")
+            self.assertEqual([item["delta"] for item in shop["ledger"] if item["kind"].startswith("shop_")], [-100])
+            records = [json.loads(line) for line in Path(os.environ["PAYMENT_LOG_PATH"]).read_text(encoding="utf-8").splitlines()]
+            outbound = next(row for row in records if row["event"] == "outbound.request")
+            returned = next(row for row in records if row["event"] == "outbound.response")
+            self.assertEqual(outbound["exchange_id"], returned["exchange_id"])
+            self.assertEqual(outbound["headers"]["Authorization"], "[REDACTED]")
+            self.assertEqual(json.loads(outbound["body"])["out_trade_no"], replay[1]["order"]["order_no"])
+            self.assertEqual(json.loads(returned["body"])["data"]["trade_no"], "119693406501863424")
+            self.assertEqual(returned["status"], 200)
+            self.assertEqual(Path(os.environ["PAYMENT_LOG_PATH"]).stat().st_mode & 0o777, 0o600)
+        finally:
+            upstream.shutdown()
+            upstream.server_close()
+            worker.join()
+
+    def test_pending_reservation_survives_interruption_and_blocks_limits(self):
+        self.seed_wallet(1)
+        self.seed_wallet(2)
+        pid = self.quota_product("1.00")
+        other = self.quota_product("0.01")
+        request_id = "interrupted-purchase-1"
+        with app.db() as connection:
+            connection.execute("UPDATE shop_products SET user_daily_limit=1, total_daily_limit=2 WHERE id=?", (pid,))
+
+        def interrupted_dispatch(*_args):
+            # Observe through a separate connection, as after a process restart.
+            with app.db() as observer:
+                row = observer.execute("SELECT status FROM shop_purchases WHERE request_id=?", (request_id,)).fetchone()
+                self.assertEqual(row["status"], "pending")
+                self.assertEqual(credits.wallet_view(observer, "1")["balance"], 900)
+            raise RuntimeError("interrupted after submitting transfer")
+
+        with self.assertRaisesRegex(RuntimeError, "interrupted"):
+            with app.db() as connection:
+                connection.execute("BEGIN IMMEDIATE")
+                app.catalog.purchase_product(connection, {"id": "1", "username": "user1"}, pid,
+                                             app.day_key(self.now), self.now, interrupted_dispatch,
+                                             daily_ldc_limit=800, request_id=request_id)
+        with patch.object(app, "dispatch_ldc", return_value=("success", "second-trade", "")) as dispatch:
+            code, replay = self.request("/api/shop/purchase", {"product_id": pid, "request_id": request_id}, user=1)
+            self.assertEqual((code, replay["status"]), (200, "pending"))
+            self.assertEqual(self.request("/api/shop/purchase", {"product_id": pid}, user=1)[0], 400)
+            app.DAILY_LDC_LIMIT = 1
+            self.assertEqual(self.request("/api/shop/purchase", {"product_id": other}, user=2)[0], 400)
+            dispatch.assert_not_called()
+            app.DAILY_LDC_LIMIT = 800
+            self.assertEqual(self.request("/api/shop/purchase", {"product_id": pid}, user=2)[0], 200)
+            self.assertEqual(self.request("/api/shop/purchase", {"product_id": pid}, user=3)[0], 400)
+            self.assertEqual(dispatch.call_count, 1)
+        shop = self.request("/api/shop", user=1)[1]
+        product = next(item for item in shop["products"] if item["id"] == pid)
+        self.assertEqual((product["user_today_count"], product["total_today_count"]), (1, 2))
+        self.assertEqual(shop["wallet"]["balance"], 900)
+
+    def test_distribute_ambiguous_response_keeps_points_and_quota(self):
+        self.seed_wallet(1)
+        pid = self.quota_product("1.00")
+        responses = [({}, "uncertain"), ({"code": 1}, "uncertain"),
+                     ({"message": "商户余额不足"}, "failed"), ({"msg": "拒绝分发"}, "failed")]
+        with patch.dict(os.environ, {"LDC_LIVE": "true", "LDC_CLIENT_ID": "client", "LDC_CLIENT_SECRET": "secret"}):
+            for response, expected in responses:
+                with self.subTest(response=response), patch.object(app, "json_request", return_value=response):
+                    code, result = self.request("/api/shop/purchase", {"product_id": pid}, user=1)
+                    self.assertEqual((code, result["status"]), (200, expected))
+        shop = self.request("/api/shop", user=1)[1]
+        self.assertEqual(shop["wallet"]["balance"], 800)
+        self.assertEqual(shop["quota"]["used"], "2.00")
+
+    def test_payment_logs_keep_http_errors_and_invalid_json_without_truncation(self):
+        large_body = ("网关错误" + "x" * 1_000_010 + "END-OF-RESPONSE").encode("utf-8")
+
+        class GatewayHandler(app.SimpleHTTPRequestHandler):
+            def log_message(self, *_args):
+                pass
+
+            def do_GET(self):
+                self.send_response(503 if self.path == "/lpay/error" else 200)
+                self.send_header("Content-Length", str(len(large_body)))
+                self.end_headers()
+                self.wfile.write(large_body)
+
+        upstream = app.CheckinServer(("127.0.0.1", 0), GatewayHandler)
+        worker = threading.Thread(target=upstream.serve_forever, daemon=True)
+        worker.start()
+        try:
+            for path, exception in [("/lpay/error", app.urllib.error.HTTPError), ("/lpay/invalid", ValueError)]:
+                with self.assertRaises(exception):
+                    app.json_request(f"http://127.0.0.1:{upstream.server_port}{path}")
+            records = [json.loads(line) for line in Path(os.environ["PAYMENT_LOG_PATH"]).read_text(encoding="utf-8").splitlines()]
+            responses = [row for row in records if row["event"] == "outbound.response"]
+            self.assertEqual([row["status"] for row in responses], [503, 200])
+            for response in responses:
+                self.assertEqual(response["body"].encode("utf-8"), large_body)
+            self.assertEqual([row["error_type"] for row in records if row["event"] == "outbound.error"], ["JSONDecodeError"])
+        finally:
+            upstream.shutdown()
+            upstream.server_close()
+            worker.join()
+
+    def test_payment_log_redacts_encoded_signatures_and_preserves_repeated_parameters(self):
+        url = "/payments/ldc/notify?out_trade_no=LDC123&%73ign=private-signature&money=1.00&money=2.00"
+        self.assertEqual(self.request(url), (400, "fail"))
+        records = [json.loads(line) for line in Path(os.environ["PAYMENT_LOG_PATH"]).read_text(encoding="utf-8").splitlines()]
+        request = next(row for row in records if row["event"] == "inbound.request")
+        query = urllib.parse.parse_qs(urllib.parse.urlsplit(request["url"]).query)
+        self.assertEqual(query["money"], ["1.00", "2.00"])
+        self.assertEqual(query["out_trade_no"], ["LDC123"])
+        self.assertNotIn("private-signature", json.dumps(records))
 
     def test_intermediate_ldc_history_preserved_without_minting_points(self):
         with app.db() as connection:

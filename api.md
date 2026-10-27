@@ -246,7 +246,9 @@ curl -X POST https://credit.linux.do/epay/pay/submit.php \
 | out_trade_no | 否 | 商户自定义单号 |
 | remark | 否 | 分发备注 |
 
-**成功响应：**`{"code":1, "data":{"trade_no":"...", "out_trade_no":"..."}}`
+**成功响应：**`{"error_msg":"", "data":{"trade_no":"...", "out_trade_no":"..."}}`
+
+以非空 `data.trade_no` 判断分发成功，不要求存在 `code`。缺少交易号时读取 `error_msg`、`message`、`msg`；若既无交易号也无明确错误，保留待核对状态，不自动退款。
 
 ### 3.5 用户余额统计
 

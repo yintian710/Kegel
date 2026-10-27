@@ -145,8 +145,8 @@ erDiagram
    - `ldc_amount`：自动发货到账的 LDC 金额（两位小数标准字符）。
    - `user_daily_limit` / `total_daily_limit`：单人/全站每日限额控制（`0` 代表不限）。
 4. **`shop_purchases`（积分兑换发货订单表）**
-   - 记录兑换订单编号、LDC 精确金额与状态（`pending` / `success` / `simulated` / `failed` / `uncertain`）及 Credit 流水号。
-   - 每日 LDC 兑换额度按北京时间重置；`pending`、`success`、`simulated`、`uncertain` 占额，`failed` 释放额度。额度汇总以两位小数字符串输出。
+   - 记录兑换订单编号、LDC 精确金额与状态（`pending` / `success` / `simulated` / `failed` / `uncertain`）及 Credit 流水号。`request_id` 与用户 ID 的唯一索引防止同一请求重复建单；重试只返回原订单。
+   - 发货前提交扣分和 `pending` 订单；进程中断后仍占额且不自动重发。每日 LDC 兑换额度按北京时间重置；`pending`、`success`、`simulated`、`uncertain` 占额，`failed` 释放额度。额度汇总以两位小数字符串输出。
 5. **`donation_orders` & `donation_settlements`（赞助订单与核验结算表）**
    - 严格分离未支付的赞助意向与已通过 MD5 验签核验的到账记录。
    - 赞助榜仅从 `donation_settlements` 聚合，杜绝未付款上榜。

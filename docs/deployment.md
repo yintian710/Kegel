@@ -169,3 +169,18 @@ sqlite3 checkin.db "VACUUM INTO '/backup/kegel_backup_$(date +%Y%m%d_%H%M%S).db'
 sqlite3 checkin.db "PRAGMA integrity_check;"
 ```
 输出 `ok` 即表示数据完整无损。
+
+### 5.3 支付请求与响应日志
+
+默认启用，UTF-8 JSONL 格式，追加写入数据库同目录下的 `<数据库名>.payments.jsonl`（默认 `checkin.payments.jsonl`）。设置 `PAYMENT_LOG_PATH=/var/log/kegel/payments.jsonl` 可覆盖位置；服务账户需要目录写入权限，新建文件权限为 `0600`。修改环境变量后重启服务生效。
+
+- 记录 `/api/shop`、`/api/shop/purchase`、`/api/donations`、`/api/donations/create`、`/payments/ldc/notify` 的请求 URL、请求头、已接收的请求体及响应头、响应体。
+- 记录服务端访问 `/lpay/`、`/epay/` 接口时的请求、完整响应、HTTP 状态及异常。包括非 JSON 和非 2xx 响应，不对业务内容做长度截断。
+- 使用 `exchange_id` 关联同一次请求与响应，订单号和交易号用于跨请求对账。回调通过记录 `callback.accepted`（包括已结算订单的重复通知），拒绝记录 `callback.rejected` 及具体原因，处理异常记录 `callback.error`。
+- 认证头、Cookie、商户密钥、令牌和签名脱敏；订单号、交易号、金额、错误消息及其他业务字段保留。现有 HTTP 访问日志中的签名也会脱敏。
+- 日志独立于数据库事务保存，订单事务回滚不删除日志。文件写入失败时，将脱敏后的完整事件输出到标准错误，不改变支付结果；需同时保留服务的标准错误日志。
+- 不自动轮转、截断或删除，备份时需单独保存，持续监控磁盘空间。拒绝超大请求或来源校验失败时，不会为日志额外读取未接收的请求体。
+
+赞助支付通过浏览器表单直接提交至 LDC，服务端仅能记录生成的支付表单和后续回调，无法看到浏览器与网关之间的响应。当前没有主动查单流程。浏览器回跳不会确认到账；回调仍须通过签名、`TRADE_SUCCESS`、商户、订单、金额及交易号校验，不依赖 `code`。未知字段或状态会被拒绝并记录原因，不会因仅有交易号就跳过验签。
+
+日志只覆盖更新并重启后的请求，不能恢复历史未记录的响应。历史可疑失败订单仍需按商户订单号与 LDC 对账。

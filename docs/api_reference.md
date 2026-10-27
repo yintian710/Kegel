@@ -204,13 +204,15 @@
 - **认证**：必须登录
 - **请求体**：
 ```json
-{ "product_id": 1 }
+{ "product_id": 1, "request_id": "63097d87-712c-4b44-bf90-58b2b9264461" }
 ```
 - **说明**：
-  - 在写事务内按商品 `ldc_amount` 检查当日剩余 LDC 兑换额度并扣除站内积分；
-  - `pending`、`success`、`simulated`、`uncertain` 订单占用额度，`failed` 订单释放额度；
-  - 自动调用 LINUX DO Credit 平台 `/lpay/distribute` 发货；
-  - 发货失败自动退款，超时记录为 `uncertain` 等待对账。
+  - 在写事务内检查个人、商品全站限购及当日剩余 LDC 额度，扣除积分并保存 `pending` 订单；提交保存后再发货；
+  - `pending`、`success`、`simulated`、`uncertain` 订单占用限购份数与 LDC 额度，`failed` 订单释放额度；
+  - `request_id` 可选，须为 16–128 位英文字母、数字、下划线或连字符；商店页面自动生成并在结果不明时保留。相同用户、相同请求编号返回原订单，不再扣分或发货；用于其他商品时拒绝请求。省略编号表示发起新的独立兑换；
+  - 调用 `/lpay/distribute` 时使用已保存的订单号作为 `out_trade_no`；非空 `data.trade_no` 即确认成功，不要求 `code == 1`；
+  - 缺少交易号时读取 `error_msg`、`message`、`msg` 判断明确拒绝并退款；成功标志但缺交易号、超时或结果不明记为 `uncertain`，进程中断可能保留 `pending`，均需对账且不自动重发；
+  - 历史 `failed` 订单可能已经到账，须按商户订单号核对 LDC 记录；本修复不会自动重发、扣回已退款积分或修改历史订单。
 - **响应示例**：
 ```json
 {

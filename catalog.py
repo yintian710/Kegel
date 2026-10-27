@@ -50,6 +50,10 @@ def init_schema(connection: sqlite3.Connection) -> None:
         created_at REAL NOT NULL,
         day TEXT NOT NULL
     )""")
+    columns = {row["name"] for row in connection.execute("PRAGMA table_info(shop_purchases)")}
+    if "request_id" not in columns:
+        connection.execute("ALTER TABLE shop_purchases ADD COLUMN request_id TEXT")
+    connection.execute("CREATE UNIQUE INDEX IF NOT EXISTS shop_purchases_request ON shop_purchases(user_id, request_id)")
     connection.execute("CREATE INDEX IF NOT EXISTS shop_purchases_user ON shop_purchases(user_id, created_at)")
     connection.execute("CREATE INDEX IF NOT EXISTS shop_purchases_day ON shop_purchases(day, product_id)")
 
@@ -192,13 +196,26 @@ def purchase_product(
     dispatch_fn: Callable[[str, dict, str], tuple[str, str, str]],
     *,
     daily_ldc_limit: int,
+    request_id: str | None = None,
 ) -> dict:
     """
     Executes a purchase of an LDC product with auto delivery.
-    Caller manages database transaction.
+    Caller starts a write transaction; reservation is committed before delivery.
     """
     if not connection.in_transaction:
         raise RuntimeError("购买商品必须处于写事务内")
+    if request_id is not None:
+        if not isinstance(request_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{16,128}", request_id):
+            raise ValueError("兑换请求编号格式错误")
+        existing = connection.execute(
+            "SELECT * FROM shop_purchases WHERE user_id=? AND request_id=?",
+            (user["id"], request_id),
+        ).fetchone()
+        if existing:
+            if existing["product_id"] != product_id:
+                raise ValueError("兑换请求编号已用于其他商品")
+            return {"order": dict(existing), "status": existing["status"],
+                    "trade_no": existing["trade_no"], "error": existing["error"]}
 
     product = connection.execute("SELECT * FROM shop_products WHERE id=?", (product_id,)).fetchone()
     if not product or not product["is_active"]:
@@ -238,9 +255,12 @@ def purchase_product(
 
     # Insert pending purchase order
     connection.execute("""INSERT INTO shop_purchases
-        (order_no, product_id, category, product_name, user_id, username, points_cost, ldc_amount, status, created_at, day)
-        VALUES (?,?,?,?,?,?,?,?,'pending',?,?)""",
-        (order_no, pid, product["category"], product["name"], user["id"], user["username"], points_cost, ldc_amount, now, today))
+        (order_no, product_id, category, product_name, user_id, username, points_cost, ldc_amount, status, created_at, day, request_id)
+        VALUES (?,?,?,?,?,?,?,?,'pending',?,?,?)""",
+        (order_no, pid, product["category"], product["name"], user["id"], user["username"], points_cost, ldc_amount, now, today, request_id))
+    # A crash after delivery must leave the debit and quota reservation intact.
+    connection.commit()
+    connection.execute("BEGIN IMMEDIATE")
 
     # Auto dispatch LDC to user's account
     status, trade_no, error = dispatch_fn(order_no, user, ldc_amount)

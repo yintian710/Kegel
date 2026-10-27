@@ -99,17 +99,20 @@ sequenceDiagram
     User->>Shop: 点击「立即兑换」
     Shop->>User: 弹出确认兑换对话框 (明示发货账号)
     User->>Shop: 确认兑换
-    Shop->>Backend: POST /api/shop/purchase (携带 product_id)
+    Shop->>Backend: POST /api/shop/purchase (product_id, request_id；重试复用编号)
     
     activate Backend
     Backend->>DB: BEGIN IMMEDIATE
+    Backend->>DB: 查询同用户 request_id，已有订单则直接返回
     Backend->>DB: 1. 校验个人与全站当日限购额度
     Backend->>DB: 2. 检查用户积分余额并扣除积分
     Backend->>DB: 3. 记录 shop_purchases (status='pending')
+    Backend->>DB: COMMIT (持久保存扣分及占额，避免分发后中断丢失订单)
+    Backend->>DB: BEGIN IMMEDIATE
     
     alt 配置了商户凭据且处于生产模式
         Backend->>LDC: POST /lpay/distribute (Basic Auth, user_id, amount, out_trade_no)
-        alt 接口返回 code == 1 (转账成功)
+        alt 返回非空 data.trade_no (转账成功，无需 code 字段)
             LDC-->>Backend: 成功并返回 trade_no
             Backend->>DB: UPDATE status='success', trade_no=...
             Backend->>DB: COMMIT
@@ -120,7 +123,7 @@ sequenceDiagram
             Backend->>DB: UPDATE status='failed', error=...
             Backend->>DB: COMMIT
             Backend-->>Shop: 发货失败，积分已全额自动退还
-        else 网络超时 / 异常响应
+        else 网络超时 / 结果不明（含成功标志但缺交易号）
             Backend->>DB: UPDATE status='uncertain', error='待人工核对'
             Backend->>DB: COMMIT (积分暂扣以防资金损失)
             Backend-->>Shop: 请求已提交，结果待管理员人工对账
