@@ -116,7 +116,7 @@ def list_products(connection: sqlite3.Connection, *, user_id: str | None = None,
 
 
 def save(connection: sqlite3.Connection, body: dict) -> dict:
-    allowed = {"id", "category", "name", "description", "points_price", "ldc_amount", "user_daily_limit", "total_daily_limit", "is_active"}
+    allowed = {"id", "category", "name", "description", "points_price", "ldc_amount", "user_daily_limit", "total_daily_limit", "is_active", "secondary_secret", "secondary_password"}
     if set(body) - allowed:
         raise ValueError("包含不支持的商品字段")
     category = str(body.get("category", "LDC")).strip()

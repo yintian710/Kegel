@@ -173,18 +173,16 @@ function renderProducts(products = []) {
     act.append(editBtn);
 
     if (item.is_active) {
-      const archBtn = actionButton("下架", async () => {
-        if (!confirm(`确定下架商品 “${item.name}” 吗？`)) return;
-        setBusy(true);
-        try {
-          await api(`/api/admin/products/${item.id}/archive`, {});
-          notify("商品已下架");
-          await refresh();
-        } catch (err) {
-          notify(`操作失败：${err.message}`);
-        } finally {
-          setBusy(false);
-        }
+      const archBtn = actionButton("下架", () => {
+        openConfirmation({
+          title: `确认下架商品 #${item.id}`,
+          description: `确认下架商品 “${item.name}” 吗？下架后用户将无法在商店兑换该商品。请输入二级密码确认。`,
+          check: "我确认下架该商品。",
+          requirePassword: true,
+          path: `/api/admin/products/${item.id}/archive`,
+          body: {},
+          onSuccess: () => notify("商品已下架。")
+        });
       }, true);
       act.append(archBtn);
     }
@@ -365,6 +363,20 @@ function openConfirmation(action) {
   $("#confirmationTitle").textContent = action.title;
   $("#confirmationDescription").textContent = action.description;
   $("#confirmationCheckText").textContent = action.check;
+  const pwGroup = $("#confirmPasswordGroup");
+  const pwInput = $("#confirmSecondaryPassword");
+  const errEl = $("#confirmModalError");
+  if (errEl) { errEl.textContent = ""; errEl.hidden = true; }
+  if (action.requirePassword) {
+    pwGroup.hidden = false;
+    pwInput.required = true;
+    pwInput.value = "";
+    setTimeout(() => pwInput.focus(), 60);
+  } else {
+    pwGroup.hidden = true;
+    pwInput.required = false;
+    pwInput.value = "";
+  }
   $("#confirmationDialog").showModal();
 }
 
@@ -506,11 +518,19 @@ $("#rewardsForm").addEventListener("submit", (event) => {
     notify("每人站内积分须为 0 至 100000000 的整数。");
     return;
   }
-  void saveSettings({ ...state.data.settings, reward_tiers: tiers }, "排名奖励设置已保存。");
+  openConfirmation({
+    title: "保存排名奖励配置",
+    description: "修改排名奖励将调整用户每日打卡可领取的站内积分，请输入二级密码确认操作。",
+    check: "我已核对各档位名次与积分数值，确认保存生效。",
+    requirePassword: true,
+    path: "/api/admin/settings",
+    body: { ...state.data.settings, reward_tiers: tiers },
+    onSuccess: () => notify("排名奖励设置已保存。"),
+  });
 });
 
 // Product catalog form
-$("#productsForm").addEventListener("submit", async (event) => {
+$("#productsForm").addEventListener("submit", (event) => {
   event.preventDefault();
   if (state.busy) return;
   const idVal = $("#productId").value;
@@ -526,24 +546,25 @@ $("#productsForm").addEventListener("submit", async (event) => {
   };
   if (idVal) body.id = Number(idVal);
 
-  setBusy(true);
-  try {
-    await api("/api/admin/products", body);
-    notify(idVal ? "商品已更新" : "新商品已添加并上架");
-    $("#productsForm").reset();
-    $("#productId").value = "";
-    $("#productCategory").value = "LDC";
-    $("#productLdcAmount").value = "1.00";
-    $("#productUserLimit").value = "1";
-    $("#productTotalLimit").value = "10";
-    $("#productActive").checked = true;
-    $("#productFormTitle").textContent = "添加上架商品";
-    await refresh();
-  } catch (err) {
-    notify(`保存商品失败：${err.message}`);
-  } finally {
-    setBusy(false);
-  }
+  openConfirmation({
+    title: idVal ? `确认更新商品 #${idVal}` : "确认上架新商品",
+    description: `商品名称：“${body.name}”，积分售价：${body.points_price} 分，LDC 发货数量：${body.ldc_amount}。购买后将自动调用 Credit 接口发货，请输入二级密码确认。`,
+    check: "我已核对商品售价与发货数量，确认上架/保存。",
+    requirePassword: true,
+    path: "/api/admin/products",
+    body: body,
+    onSuccess: () => {
+      notify(idVal ? "商品已更新。" : "新商品已添加并上架。");
+      $("#productsForm").reset();
+      $("#productId").value = "";
+      $("#productCategory").value = "LDC";
+      $("#productLdcAmount").value = "1.00";
+      $("#productUserLimit").value = "1";
+      $("#productTotalLimit").value = "10";
+      $("#productActive").checked = true;
+      $("#productFormTitle").textContent = "添加上架商品";
+    }
+  });
 });
 
 $("#productReset").addEventListener("click", () => {
@@ -589,16 +610,34 @@ $("#cancelConfirmation").addEventListener("click", () => {
 $("#confirmationForm").addEventListener("submit", async (event) => {
   event.preventDefault();
   if (state.busy || !state.action || !$("#confirmed").checked) return;
-  const { path, body } = state.action;
+  const { path, body, requirePassword, onSuccess } = state.action;
+  const payload = { ...body };
+  if (requirePassword) {
+    const sec = $("#confirmSecondaryPassword").value;
+    if (!sec) {
+      const errEl = $("#confirmModalError");
+      if (errEl) { errEl.textContent = "请输入二级密码以确认操作"; errEl.hidden = false; }
+      return;
+    }
+    payload.secondary_secret = sec;
+    payload.secondary_password = sec;
+  }
   setBusy(true);
   try {
-    await api(path, body);
+    await api(path, payload);
     state.action = null;
     $("#confirmationDialog").close();
+    if (onSuccess) onSuccess();
+    else notify("操作已成功执行。");
     await refresh();
-    notify("操作已成功执行。");
   } catch (err) {
-    notify(`操作失败：${err.message}`);
+    const errEl = $("#confirmModalError");
+    if (errEl && $("#confirmationDialog").open) {
+      errEl.textContent = err.message;
+      errEl.hidden = false;
+    } else {
+      notify(`操作失败：${err.message}`);
+    }
   } finally {
     setBusy(false);
   }

@@ -385,12 +385,17 @@
       <form id="confirmationForm">
         <h2 id="confirmationTitle" style="font-size: 18px; font-weight: 700; margin: 0 0 8px 0;"></h2>
         <p id="confirmationDescription" style="font-size: 14px; color: var(--text-muted); margin: 0 0 20px 0;"></p>
-        <div style="margin-bottom: 20px;">
+        <div id="confirmPasswordGroup" class="form-group" style="margin-bottom: 16px;" hidden>
+          <label class="form-label" for="confirmSecondaryPassword">管理员二级密码</label>
+          <input id="confirmSecondaryPassword" class="input-text" type="password" autocomplete="off" placeholder="请输入二级密码以确认操作" maxlength="1024" />
+        </div>
+        <div style="margin-bottom: 16px;">
           <label style="display: flex; align-items: center; gap: 8px; font-size: 13px;">
             <input id="confirmed" type="checkbox" required />
             <span id="confirmationCheckText">我确认执行此操作。</span>
           </label>
         </div>
+        <p id="confirmModalError" role="alert" style="font-size: 13px; color: #dc2626; margin: 0 0 16px 0;" hidden></p>
         <div style="display: flex; gap: 12px; justify-content: flex-end;">
           <button id="cancelConfirmation" class="btn-secondary" type="button">取消</button>
           <button id="confirmButton" class="btn-primary" type="submit">确认执行</button>

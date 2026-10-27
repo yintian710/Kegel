@@ -44,7 +44,7 @@ class CheckinBehavior(unittest.TestCase):
         self.addCleanup(self.config.stop)
         self.environment = patch.dict(os.environ, {"LDC_DONATION_ENABLED": "false", "LDC_CLIENT_ID": "", "LDC_CLIENT_SECRET": "",
                                                    "LINUXDO_CLIENT_ID": "", "LINUXDO_CLIENT_SECRET": "",
-                                                   "ADMIN_POINTS_PASSWORD_HASH": "",
+                                                   "ADMIN_POINTS_PASSWORD_HASH": self.secondary_hash,
                                                    "PAYMENT_LOG_PATH": str(Path(self.temp.name) / "payments.jsonl")})
         self.environment.start()
         self.addCleanup(self.environment.stop)
@@ -65,6 +65,7 @@ class CheckinBehavior(unittest.TestCase):
             request_headers["Cookie"] = f"linuxdo_session={token}"
         if admin:
             request_headers["X-Admin-Token"] = "test-admin"
+            request_headers["X-Secondary-Password"] = urllib.parse.quote(self.secondary_secret)
         request_headers.update(headers or {})
         connection = http.client.HTTPConnection(*self.server.server_address, timeout=10)
         try:
@@ -405,6 +406,43 @@ class CheckinBehavior(unittest.TestCase):
         with patch.object(app, "dispatch_ldc") as dispatch:
             self.assertEqual(self.request("/api/shop/purchase", {"product_id": small}, user=1)[0], 400)
             dispatch.assert_not_called()
+
+    def test_secondary_password_required_for_rewards_and_products(self):
+        # 1. Update reward tiers
+        tiers_payload = {"reward_tiers": [{"through": 10, "amount": 1000}]}
+        # Without password
+        code, err = self.request("/api/admin/settings", tiers_payload, admin=True, headers={"X-Secondary-Password": ""})
+        self.assertEqual(code, 403)
+        # With wrong password
+        code, err = self.request("/api/admin/settings", tiers_payload, admin=True, headers={"X-Secondary-Password": "bad"})
+        self.assertEqual(code, 403)
+        # With correct password
+        code, res = self.request("/api/admin/settings", tiers_payload, admin=True)
+        self.assertEqual(code, 200)
+
+        # 2. Add product
+        prod_payload = {
+            "category": "LDC", "name": "测试商品", "description": "测试",
+            "points_price": 100, "ldc_amount": "1.00", "user_daily_limit": 1, "total_daily_limit": 5, "is_active": True
+        }
+        code, err = self.request("/api/admin/products", prod_payload, admin=True, headers={"X-Secondary-Password": ""})
+        self.assertEqual(code, 403)
+        code, res = self.request("/api/admin/products", prod_payload, admin=True)
+        self.assertEqual(code, 200)
+        pid = res["product"]["id"]
+
+        # 3. Archive product
+        code, err = self.request(f"/api/admin/products/{pid}/archive", {}, admin=True, headers={"X-Secondary-Password": "wrong"})
+        self.assertEqual(code, 403)
+        code, res = self.request(f"/api/admin/products/{pid}/archive", {}, admin=True)
+        self.assertEqual(code, 200)
+
+        # 4. Support ADMIN_SECONDARY_PASSWORD plaintext fallback
+        with patch.dict(os.environ, {"ADMIN_POINTS_PASSWORD_HASH": "", "ADMIN_SECONDARY_PASSWORD": "plain-secondary-pass"}):
+            code, _ = self.request("/api/admin/products", prod_payload, admin=True, headers={"X-Secondary-Password": "plain-secondary-pass"})
+            self.assertEqual(code, 200)
+            code, _ = self.request("/api/admin/products", prod_payload, admin=True, headers={"X-Secondary-Password": "wrong"})
+            self.assertEqual(code, 403)
 
     def test_environment_budget_overrides_obsolete_database_settings(self):
         with app.db() as connection:

@@ -217,7 +217,7 @@ def settings(connection) -> dict[str, Any]:
 
 
 def validate_settings(body: dict[str, Any]) -> dict[str, Any]:
-    if set(body) - set(DEFAULT_SETTINGS):
+    if set(body) - set(DEFAULT_SETTINGS) - {"secondary_secret", "secondary_password"}:
         raise APIError("包含不支持的配置项")
     result = {}
     if "deadline" in body:
@@ -429,17 +429,23 @@ def admin_users(connection, query: str) -> list[dict]:
 
 
 def verify_admin_points_secret(value) -> None:
-    configured = os.environ.get("ADMIN_POINTS_PASSWORD_HASH", "").strip()
-    parts = configured.split("$")
-    if (len(parts) != 4 or parts[0] != "pbkdf2_sha256" or parts[1] != "600000"
-            or not re.fullmatch(r"[0-9a-f]{32}", parts[2]) or not re.fullmatch(r"[0-9a-f]{64}", parts[3])):
-        raise APIError("未配置有效的加积分二级密码哈希", 503)
+    configured_hash = os.environ.get("ADMIN_POINTS_PASSWORD_HASH", "").strip() or os.environ.get("ADMIN_SECONDARY_PASSWORD_HASH", "").strip()
+    plain = os.environ.get("ADMIN_SECONDARY_PASSWORD", "").strip()
+    if not configured_hash and not plain:
+        raise APIError("未配置管理员二级密码（请在 .env 配置 ADMIN_SECONDARY_PASSWORD 或 ADMIN_POINTS_PASSWORD_HASH）", 503)
     if not isinstance(value, str) or not value or len(value) > 1024:
         raise APIError("请输入有效的二级密码", 403)
+    if plain:
+        if not hmac.compare_digest(value, plain):
+            raise APIError("二级密码不正确", 403)
+        return
+    parts = configured_hash.split("$")
+    if (len(parts) != 4 or parts[0] != "pbkdf2_sha256" or parts[1] != "600000"
+            or not re.fullmatch(r"[0-9a-f]{32}", parts[2]) or not re.fullmatch(r"[0-9a-f]{64}", parts[3])):
+        raise APIError("未配置有效的二级密码哈希", 503)
     digest = hashlib.pbkdf2_hmac("sha256", value.encode("utf-8"), bytes.fromhex(parts[2]), 600000).hex()
     if not hmac.compare_digest(digest, parts[3]):
         raise APIError("二级密码不正确", 403)
-
 
 def dispatch_ldc(order_no: str, user: dict, amount: str) -> tuple[str, str, str]:
     """Auto delivers LDC to user using Linux DO Credit /lpay/distribute."""
@@ -748,11 +754,15 @@ class AppHandler(SimpleHTTPRequestHandler):
             self.json_response({"ok": True})
         elif path == "/api/admin/products":
             self.require_admin()
+            secret = body.get("secondary_secret") or body.get("secondary_password") or urllib.parse.unquote(self.headers.get("X-Secondary-Password", "")) or urllib.parse.unquote(self.headers.get("X-Secondary-Secret", ""))
+            verify_admin_points_secret(secret)
             with db() as connection:
                 product = catalog.save(connection, body)
             self.json_response({"ok": True, "product": product})
         elif path.startswith("/api/admin/products/") and path.endswith("/archive"):
             self.require_admin()
+            secret = body.get("secondary_secret") or body.get("secondary_password") or urllib.parse.unquote(self.headers.get("X-Secondary-Password", "")) or urllib.parse.unquote(self.headers.get("X-Secondary-Secret", ""))
+            verify_admin_points_secret(secret)
             product_id = int(path.removeprefix("/api/admin/products/").removesuffix("/archive").strip("/"))
             with db() as connection:
                 catalog.archive(connection, product_id)
@@ -871,6 +881,9 @@ class AppHandler(SimpleHTTPRequestHandler):
         if path == "/api/admin/open":
             open_today("manual")
         elif path == "/api/admin/settings":
+            if "reward_tiers" in body:
+                secret = body.get("secondary_secret") or body.get("secondary_password") or urllib.parse.unquote(self.headers.get("X-Secondary-Password", "")) or urllib.parse.unquote(self.headers.get("X-Secondary-Secret", ""))
+                verify_admin_points_secret(secret)
             values = validate_settings(body)
             with db() as connection:
                 for key, value in values.items():
