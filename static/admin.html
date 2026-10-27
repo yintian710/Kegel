@@ -306,12 +306,19 @@
             <!-- User Wallets -->
             <div class="card">
               <h3 style="font-size: 16px; font-weight: 700; margin: 0 0 16px 0;">用户积分余额</h3>
+              <p id="adminCreditStatus" style="font-size: 13px; color: var(--text-muted);"></p>
+              <form id="userSearchForm" style="display: flex; gap: 8px; margin-bottom: 16px;">
+                <input id="userSearchQuery" class="input-text" type="search" maxlength="128" required aria-label="用户名或用户 ID" placeholder="搜索用户名或用户 ID" />
+                <button class="btn-secondary" type="submit" style="flex-shrink: 0; white-space: nowrap;">搜索</button>
+              </form>
+              <p id="userSearchStatus" style="font-size: 12px; color: var(--text-dim);" role="status"></p>
               <div class="table-wrap" style="max-height: 480px; overflow-y: auto;">
                 <table class="data-table">
                   <thead>
                     <tr>
                       <th>用户</th>
                       <th>站内积分余额</th>
+                      <th>操作</th>
                     </tr>
                   </thead>
                   <tbody id="walletRows"></tbody>
@@ -337,6 +344,26 @@
         <div style="display: flex; gap: 12px; justify-content: flex-end;">
           <button id="cancelConfirmation" class="btn-secondary" type="button">取消</button>
           <button id="confirmButton" class="btn-primary" type="submit">确认执行</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="creditDialog" class="dialog-modal">
+      <form id="creditForm">
+        <h2 style="font-size: 18px; margin: 0 0 8px;">增加用户积分</h2>
+        <p id="creditUserLabel" style="font-size: 14px; color: var(--text-muted);"></p>
+        <div class="form-group">
+          <label class="form-label" for="creditAmount">增加积分</label>
+          <input id="creditAmount" class="input-text" type="number" min="1" max="100000000" step="1" required />
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="creditSecret">二级密码</label>
+          <input id="creditSecret" class="input-text" type="&#112;assword" required autocomplete="off" maxlength="1024" />
+        </div>
+        <p id="creditError" role="alert" style="font-size: 13px; color: #dc2626;"></p>
+        <div style="display: flex; gap: 12px; justify-content: flex-end;">
+          <button id="creditCancel" class="btn-secondary" type="button">取消</button>
+          <button class="btn-primary" type="submit">确认增加积分</button>
         </div>
       </form>
     </dialog>

@@ -28,6 +28,8 @@ APP_BASE_URL=https://kegel.yourdomain.com
 # 2. 安全与密钥 (生产环境必须设置至少 32 字符的强随机串)
 APP_SECRET=your-super-long-and-secure-random-secret-key-at-least-32-chars
 ADMIN_TOKEN=your-strong-admin-token-for-management-console
+# 管理员加积分二级密码，仅填写下方生成命令输出的加盐哈希；留空禁用加积分:
+ADMIN_POINTS_PASSWORD_HASH=
 
 # 3. LINUX DO Connect 授权配置 (用于用户登录)
 LINUXDO_CLIENT_ID=your-connect-client-id
@@ -174,7 +176,7 @@ sqlite3 checkin.db "PRAGMA integrity_check;"
 
 默认启用，UTF-8 JSONL 格式，追加写入数据库同目录下的 `<数据库名>.payments.jsonl`（默认 `checkin.payments.jsonl`）。设置 `PAYMENT_LOG_PATH=/var/log/kegel/payments.jsonl` 可覆盖位置；服务账户需要目录写入权限，新建文件权限为 `0600`。修改环境变量后重启服务生效。
 
-- 记录 `/api/shop`、`/api/shop/purchase`、`/api/donations`、`/api/donations/create`、`/payments/ldc/notify` 的请求 URL、请求头、已接收的请求体及响应头、响应体。
+- 记录 `/api/shop`、`/api/shop/purchase`、`/api/donations`、`/api/donations/create`、`/payments/ldc/notify` 和 `/api/admin/points/add` 的请求 URL、请求头、已接收的请求体及响应头、响应体。管理员加积分的二级密码始终脱敏。
 - 记录服务端访问 `/lpay/`、`/epay/` 接口时的请求、完整响应、HTTP 状态及异常。包括非 JSON 和非 2xx 响应，不对业务内容做长度截断。
 - 使用 `exchange_id` 关联同一次请求与响应，订单号和交易号用于跨请求对账。回调通过记录 `callback.accepted`（包括已结算订单的重复通知），拒绝记录 `callback.rejected` 及具体原因，处理异常记录 `callback.error`。
 - 认证头、Cookie、商户密钥、令牌和签名脱敏；订单号、交易号、金额、错误消息及其他业务字段保留。现有 HTTP 访问日志中的签名也会脱敏。
@@ -184,3 +186,26 @@ sqlite3 checkin.db "PRAGMA integrity_check;"
 赞助支付通过浏览器表单直接提交至 LDC，服务端仅能记录生成的支付表单和后续回调，无法看到浏览器与网关之间的响应。当前没有主动查单流程。浏览器回跳不会确认到账；回调仍须通过签名、`TRADE_SUCCESS`、商户、订单、金额及交易号校验，不依赖 `code`。未知字段或状态会被拒绝并记录原因，不会因仅有交易号就跳过验签。
 
 日志只覆盖更新并重启后的请求，不能恢复历史未记录的响应。历史可疑失败订单仍需按商户订单号与 LDC 对账。
+
+### 5.4 管理员加积分二级密码
+
+管理员页面的“记录查询 → 用户积分余额”支持搜索用户并增加积分，每笔操作同时需要管理员口令和二级密码。`.env` 中只保存 `ADMIN_POINTS_PASSWORD_HASH`，不保存明文密码。使用 Python 标准库 PBKDF2-HMAC-SHA256，迭代 600000 次、随机 16 字节盐；与普通 SHA-256 摘要不兼容。
+
+在自己的终端运行以下命令，输入两次二级密码（输入不回显）。将输出的整行原样放入 `.env`，然后重启服务：
+
+```bash
+python3 -c '
+import getpass, hashlib, secrets
+value = getpass.getpass("二级密码：")
+confirmation = getpass.getpass("再次输入：")
+if not value or len(value) > 1024 or value != confirmation:
+    raise SystemExit("密码为空、超过 1024 字符或两次输入不一致")
+salt = secrets.token_bytes(16)
+digest = hashlib.pbkdf2_hmac("sha256", value.encode("utf-8"), salt, 600000).hex()
+print("ADMIN_POINTS_PASSWORD_HASH=pbkdf2_sha256$600000$" + salt.hex() + "$" + digest)
+'
+```
+
+通过系统环境变量或 shell 设置时，须用单引号包住哈希，防止 `$` 被 shell 展开。配置缺失或格式错误时加积分接口拒绝操作；其他管理功能不受影响。每次加积分都需重新输入密码，浏览器不会保存二级密码，支付日志中也会脱敏。
+
+单笔支持 1–100000000 整数积分，余额与 `admin_credit` 流水一起提交。核对目标用户名、ID 和金额后再提交；同一请求重试不会重复加分。加积分不直接调整 LDC 兑换额度，也不确认赞助到账。

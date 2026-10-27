@@ -136,9 +136,11 @@ erDiagram
 1. **`points_wallets`（站内积分钱包表）**
    - `user_id` (TEXT, PK)：用户在 LINUX DO Connect 的唯一数字 ID。
    - `balance` (INTEGER)：可用积分余额，带有非负校验 `CHECK(balance >= 0)`。
+   - OAuth 登录成功时建立零余额钱包并更新用户名；管理员可搜索已有钱包、访问、打卡和赞助记录中的用户。
 2. **`points_ledger`（积分流水明细表）**
    - 记录每一笔积分变动：入账（`delta > 0`）或消费扣减（`delta < 0`）。
    - `(kind, reference)` 联合唯一键，从数据库底层防御重复入账或扣减。
+   - 管理员加积分使用 `kind=admin_credit`，与余额在同一写事务提交；客户端操作编号作为 `reference`，重复请求不重复入账，用户或积分不匹配时拒绝。
 3. **`shop_products`（商店商品配置表）**
    - 预留品类扩展，当前固定为 `LDC`。
    - `points_price`：兑换扣除积分。

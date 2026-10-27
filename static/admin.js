@@ -2,7 +2,7 @@
 
 const $ = (selector) => document.querySelector(selector);
 const tokenKey = "checkin_admin_token";
-const state = { token: "", data: null, busy: false, action: null };
+const state = { token: "", data: null, busy: false, action: null, creditUsers: null, creditUser: null, creditRequest: null };
 const rewardLabels = { unclaimed: "未领取", credited: "已记入钱包", none: "无奖励" };
 
 function notify(message) {
@@ -22,7 +22,7 @@ async function api(path = "/api/admin", body) {
   });
   const data = await response.json().catch(() => { throw new Error("无法读取服务器响应。"); });
   if (!response.ok || data.ok === false) {
-    if (response.status === 401 || response.status === 403) {
+    if (response.status === 401) {
       state.token = "";
       try { sessionStorage.removeItem(tokenKey); } catch {}
       showLogin();
@@ -34,6 +34,11 @@ async function api(path = "/api/admin", body) {
 
 function showLogin() {
   $("#confirmationDialog").close();
+  $("#creditDialog").close();
+  $("#creditForm").reset();
+  state.creditUser = null;
+  state.creditRequest = null;
+  state.creditUsers = null;
   $("#dashboard").hidden = true;
   $("#loginPanel").hidden = false;
 }
@@ -43,6 +48,9 @@ function setBusy(value) {
   document.querySelectorAll("button").forEach((btn) => { btn.disabled = value; });
   if (!value && state.data) {
     $("#openButton").disabled = state.data.status.is_open;
+    document.querySelectorAll("[data-admin-credit]").forEach((btn) => {
+      btn.disabled = !state.data.admin_credit_enabled;
+    });
   }
 }
 
@@ -225,6 +233,33 @@ function renderPurchases(purchases = []) {
   }
 }
 
+function renderCreditUsers(users) {
+  const body = $("#walletRows");
+  body.replaceChildren();
+  if (!users.length) emptyTable(body, 3, "没有找到用户。");
+  for (const user of users) {
+    const row = document.createElement("tr");
+    cell(row, `@${user.username} (${user.user_id})`);
+    cell(row, `${user.balance} 积分`);
+    const button = actionButton("增加积分", () => {
+      if (state.busy || !state.data.admin_credit_enabled) return;
+      state.creditUser = user;
+      state.creditRequest = null;
+      $("#creditForm").reset();
+      $("#creditError").textContent = "";
+      $("#creditUserLabel").textContent = `@${user.username} · ID ${user.user_id} · 当前 ${user.balance} 积分`;
+      $("#creditDialog").showModal();
+      $("#creditAmount").focus();
+    });
+    button.dataset.adminCredit = "";
+    button.disabled = state.busy || !state.data.admin_credit_enabled;
+    const actions = document.createElement("td");
+    actions.append(button);
+    row.append(actions);
+    body.append(row);
+  }
+}
+
 function render() {
   const { settings, status, visits, rewards, wallets, practice_triggers = [], products = [] } = state.data;
   $("#loginPanel").hidden = true;
@@ -311,17 +346,10 @@ function render() {
   }
 
   // Wallets
-  const walletBody = $("#walletRows");
-  walletBody.replaceChildren();
-  if (!wallets.length) emptyTable(walletBody, 2, "暂无站内积分钱包。");
-  for (const wallet of wallets) {
-    const row = document.createElement("tr");
-    cell(row, `@${wallet.username} (${wallet.user_id})`);
-    const balCell = cell(row, `${wallet.balance} 积分`);
-    balCell.style.fontWeight = "700";
-    balCell.style.color = "var(--primary)";
-    walletBody.append(row);
-  }
+  $("#adminCreditStatus").textContent = state.data.admin_credit_enabled
+    ? "搜索用户后可增加积分，每次操作均需输入二级密码。"
+    : "二级密码尚未配置，暂不能增加积分。";
+  renderCreditUsers(state.creditUsers ?? wallets);
 }
 
 function openConfirmation(action) {
@@ -379,6 +407,68 @@ $("#logoutButton").addEventListener("click", () => {
   $("#confirmationDialog").close();
   showLogin();
   $("#adminToken").focus();
+});
+
+$("#userSearchForm").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  if (state.busy) return;
+  setBusy(true);
+  try {
+    const query = $("#userSearchQuery").value.trim();
+    const result = await api(`/api/admin/users?q=${encodeURIComponent(query)}`);
+    state.creditUsers = result.users;
+    renderCreditUsers(result.users);
+    $("#userSearchStatus").textContent = `找到 ${result.users.length} 位用户，最多显示 50 位。`;
+  } catch (error) {
+    notify(error.message);
+  } finally {
+    setBusy(false);
+  }
+});
+
+$("#creditCancel").addEventListener("click", () => {
+  if (!state.busy) $("#creditDialog").close();
+});
+$("#creditDialog").addEventListener("cancel", (event) => {
+  if (state.busy) event.preventDefault();
+});
+$("#creditDialog").addEventListener("close", () => {
+  $("#creditSecret").value = "";
+  state.creditUser = null;
+  state.creditRequest = null;
+});
+
+$("#creditForm").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  if (state.busy || !state.creditUser) return;
+  const user = state.creditUser;
+  const amount = $("#creditAmount").value;
+  const secondarySecret = $("#creditSecret").value;
+  $("#creditSecret").value = "";
+  $("#creditError").textContent = "";
+  if (!state.creditRequest || state.creditRequest.amount !== amount) {
+    state.creditRequest = { id: crypto.randomUUID(), amount };
+  }
+  setBusy(true);
+  let credited = false;
+  try {
+    const result = await api("/api/admin/points/add", {
+      user_id: user.user_id, amount, secondary_secret: secondarySecret, request_id: state.creditRequest.id,
+    });
+    credited = true;
+    if (state.creditUsers) {
+      state.creditUsers = state.creditUsers.map((item) => item.user_id === user.user_id
+        ? { ...item, balance: result.wallet.balance } : item);
+    }
+    $("#creditDialog").close();
+    notify(`已向 @${result.user.username} 增加 ${result.entry.delta} 积分，当前余额 ${result.wallet.balance}。`);
+    await refresh();
+  } catch (error) {
+    if (credited) notify(`加积分已成功，刷新失败：${error.message}`);
+    else $("#creditError").textContent = error.message;
+  } finally {
+    setBusy(false);
+  }
 });
 
 $("#settingsForm").addEventListener("submit", (event) => {

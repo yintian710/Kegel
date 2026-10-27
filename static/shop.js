@@ -241,6 +241,7 @@ function renderLedger(ledger = []) {
 
   const kindMap = {
     checkin: "每日打卡奖励",
+    admin_credit: "管理员增加积分",
     shop_purchase: "商品兑换扣除",
     shop_refund: "发货失败退款"
   };

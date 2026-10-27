@@ -101,6 +101,38 @@ def refund_points(connection: sqlite3.Connection, user: dict, amount: int, kind:
     return balance
 
 
+def grant_points(connection: sqlite3.Connection, user: dict, amount: int, reference: str, now: float) -> dict:
+    """Caller holds BEGIN IMMEDIATE; an administrator request credits a wallet once."""
+    if not connection.in_transaction:
+        raise RuntimeError("管理员加积分必须处于写事务内")
+    amount = parse_points(amount)
+    if amount <= 0:
+        raise ValueError("增加积分必须是正整数")
+    existing = connection.execute(
+        "SELECT * FROM points_ledger WHERE kind='admin_credit' AND reference=?", (reference,)
+    ).fetchone()
+    if existing:
+        if existing["user_id"] != user["id"] or existing["delta"] != amount:
+            raise ValueError("此操作编号已用于其他加积分请求")
+        return dict(existing)
+    connection.execute(
+        "INSERT INTO points_wallets(user_id,username) VALUES (?,?) ON CONFLICT(user_id) DO UPDATE SET username=excluded.username",
+        (user["id"], user["username"]),
+    )
+    changed = connection.execute(
+        "UPDATE points_wallets SET balance=balance+? WHERE user_id=? AND balance<=?",
+        (amount, user["id"], MAX_POINTS - amount),
+    ).rowcount
+    if not changed:
+        raise ValueError("积分余额超出上限")
+    balance = wallet_view(connection, user["id"])["balance"]
+    connection.execute(
+        "INSERT INTO points_ledger(user_id,kind,reference,delta,balance_after,created_at) VALUES (?,'admin_credit',?,?,?,?)",
+        (user["id"], reference, amount, balance, now),
+    )
+    return dict(connection.execute("SELECT * FROM points_ledger WHERE kind='admin_credit' AND reference=?", (reference,)).fetchone())
+
+
 def ledger_view(connection: sqlite3.Connection, user_id: str, tz) -> list[dict]:
     rows = connection.execute("SELECT id,kind,reference,delta,balance_after,created_at FROM points_ledger WHERE user_id=? ORDER BY id DESC LIMIT 100", (user_id,))
     result = []

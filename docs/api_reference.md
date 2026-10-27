@@ -288,3 +288,14 @@ X-Admin-Token: <ADMIN_TOKEN>
 | `/api/admin/review` | POST | `{ "user_id": "123", "approved": true }` | 批准异常访问标记，恢复正常打卡资格 |
 | `/api/admin/products` | POST | `{ "id"?: 1, "category": "LDC", "name": "...", "points_price": 500, "ldc_amount": "1.00", "user_daily_limit": 1, "total_daily_limit": 10, "is_active": true }` | 新增或编辑商品 |
 | `/api/admin/products/<id>/archive` | POST | `{}` | 立即下架指定商品 |
+| `/api/admin/users?q=<用户名或用户ID>` | GET | 无 | 搜索已有站内记录的数字 ID 用户，用户名不区分 ASCII 大小写、支持部分匹配与 `@` 前缀，ID 精确匹配；最多返回 50 位用户及余额 |
+| `/api/admin/points/add` | POST | `{ "user_id": "123", "amount": 250, "secondary_secret": "输入的二级密码", "request_id": "客户端生成的UUID" }` | 验证管理员口令与二级密码后增加站内积分，返回 `user`、`wallet`、`entry` |
+
+加积分说明：
+
+- `ADMIN_POINTS_PASSWORD_HASH` 存储 PBKDF2-HMAC-SHA256 加盐哈希，格式及生成命令见部署文档。未配置或格式错误返回 `503`；二级密码错误返回 `403`，不会清除前端管理员登录状态。管理员口令错误仍返回 `401`。
+- `amount` 为 1–100000000 的整数或十进制整数字符串；用户必须存在于站内记录，匿名访客不接受加分。余额不能超过 `9000000000000000`。
+- `request_id` 为 16–128 位英文字母、数字、下划线或连字符；相同编号和相同用户、积分重复请求返回原流水；编号已用于其他用户或金额时拒绝，不重复入账。请求重试仍须验证二级密码。
+- 余额变动与 `kind=admin_credit` 流水在同一写事务提交；流水失败全部回滚。该接口也写入支付日志，二级密码和哈希不会写入日志或返回前端。
+- 搜索覆盖钱包、访问、打卡和赞助记录；今后 OAuth 登录会建立零余额钱包并更新用户名。仅有历史 Cookie、从未在服务端留下用户记录的身份，需再次登录后才能搜索。
+

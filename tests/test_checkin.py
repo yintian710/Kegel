@@ -25,6 +25,10 @@ class CheckinBehavior(unittest.TestCase):
         cls.server = app.CheckinServer(("127.0.0.1", 0), QuietHandler)
         cls.worker = threading.Thread(target=cls.server.serve_forever, daemon=True)
         cls.worker.start()
+        cls.secondary_secret = '二级校验"&测试'
+        salt = "0123456789abcdef0123456789abcdef"
+        digest = hashlib.pbkdf2_hmac("sha256", cls.secondary_secret.encode("utf-8"), bytes.fromhex(salt), 600000).hex()
+        cls.secondary_hash = f"pbkdf2_sha256$600000${salt}${digest}"
 
     @classmethod
     def tearDownClass(cls):
@@ -40,6 +44,7 @@ class CheckinBehavior(unittest.TestCase):
         self.addCleanup(self.config.stop)
         self.environment = patch.dict(os.environ, {"LDC_DONATION_ENABLED": "false", "LDC_CLIENT_ID": "", "LDC_CLIENT_SECRET": "",
                                                    "LINUXDO_CLIENT_ID": "", "LINUXDO_CLIENT_SECRET": "",
+                                                   "ADMIN_POINTS_PASSWORD_HASH": "",
                                                    "PAYMENT_LOG_PATH": str(Path(self.temp.name) / "payments.jsonl")})
         self.environment.start()
         self.addCleanup(self.environment.stop)
@@ -750,6 +755,70 @@ class CheckinBehavior(unittest.TestCase):
         self.assertEqual(query["money"], ["1.00", "2.00"])
         self.assertEqual(query["out_trade_no"], ["LDC123"])
         self.assertNotIn("private-signature", json.dumps(records))
+
+    def test_admin_user_search_includes_users_without_wallets_and_beyond_dashboard_limit(self):
+        self.assertEqual(self.request("/api/admin/users?q=user77")[0], 401)
+        self.request("/api/visit", {}, user=77)
+        self.request("/api/visit", {})
+        with app.db() as connection:
+            connection.executemany("INSERT INTO points_wallets(user_id,username) VALUES (?,?)",
+                                   [(str(index), f"member{index}") for index in range(1000, 1600)])
+        code, result = self.request("/api/admin/users?q=@USER77", admin=True)
+        self.assertEqual((code, result["users"]), (200, [{"user_id": "77", "username": "user77", "balance": 0}]))
+        self.assertEqual(self.request("/api/admin/users?q=1599", admin=True)[1]["users"][0]["user_id"], "1599")
+        self.assertEqual(self.request("/api/admin/users?q=%25", admin=True)[1]["users"], [])
+        self.assertEqual(self.request("/api/admin/users?q=", admin=True)[0], 400)
+        self.assertEqual(self.request("/api/admin/users?q=anon", admin=True)[1]["users"], [])
+
+    def test_admin_credit_requires_both_secrets_and_valid_configuration(self):
+        self.seed_wallet(1)
+        body = {"user_id": "1", "amount": 250, "secondary_secret": self.secondary_secret, "request_id": "admin-credit-request-1"}
+        self.assertEqual(self.request("/api/admin/points/add", body)[0], 401)
+        for configured in ("", "plain-secret", "pbkdf2_sha256$1$bad$bad"):
+            with patch.dict(os.environ, {"ADMIN_POINTS_PASSWORD_HASH": configured}):
+                self.assertEqual(self.request("/api/admin/points/add", body, admin=True)[0], 503)
+        with patch.dict(os.environ, {"ADMIN_POINTS_PASSWORD_HASH": self.secondary_hash}):
+            for secret in ("wrong-secret", "", None):
+                self.assertEqual(self.request("/api/admin/points/add", dict(body, secondary_secret=secret), admin=True)[0], 403)
+            self.assertEqual(self.request("/api/admin", admin=True)[0], 200)
+        self.assertEqual(self.request("/api/shop", user=1)[1]["wallet"]["balance"], 1000)
+        self.assertNotIn(self.secondary_secret, Path(os.environ["PAYMENT_LOG_PATH"]).read_text(encoding="utf-8"))
+
+    def test_admin_credit_is_atomic_and_parallel_replays_credit_once(self):
+        self.request("/api/visit", {}, user=77)
+        body = {"user_id": "77", "amount": "250", "secondary_secret": self.secondary_secret, "request_id": "admin-credit-request-77"}
+        with patch.dict(os.environ, {"ADMIN_POINTS_PASSWORD_HASH": self.secondary_hash}):
+            with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
+                results = list(pool.map(lambda _: self.request("/api/admin/points/add", body, admin=True), range(4)))
+            self.assertTrue(all(code == 200 and result["wallet"]["balance"] == 250 for code, result in results))
+            self.assertEqual(self.request("/api/admin/points/add", dict(body, amount=251), admin=True)[0], 400)
+            self.assertEqual(self.request("/api/admin/points/add", dict(body, user_id="99999"), admin=True)[0], 404)
+            for amount in (0, -1, True, 1.5, "1.2", 100000001):
+                with self.subTest(amount=amount):
+                    self.assertEqual(self.request("/api/admin/points/add", dict(body, amount=amount, request_id="invalid-amount-request"), admin=True)[0], 400)
+        shop = self.request("/api/shop", user=77)[1]
+        self.assertEqual(shop["wallet"]["balance"], 250)
+        self.assertEqual([(row["kind"], row["delta"], row["balance_after"]) for row in shop["ledger"]], [("admin_credit", 250, 250)])
+        log_text = Path(os.environ["PAYMENT_LOG_PATH"]).read_text(encoding="utf-8")
+        self.assertNotIn(self.secondary_secret, log_text)
+        self.assertNotIn(self.secondary_hash, log_text)
+        self.assertIn("[REDACTED]", log_text)
+
+    def test_admin_credit_ledger_failure_and_balance_overflow_leave_wallet_unchanged(self):
+        self.request("/api/visit", {}, user=77)
+        body = {"user_id": "77", "amount": 10, "secondary_secret": self.secondary_secret, "request_id": "admin-credit-rollback-77"}
+        with app.db() as connection:
+            connection.execute("CREATE TRIGGER reject_admin_credit BEFORE INSERT ON points_ledger WHEN NEW.kind='admin_credit' BEGIN SELECT RAISE(ABORT,'forced failure'); END")
+        with patch.dict(os.environ, {"ADMIN_POINTS_PASSWORD_HASH": self.secondary_hash}):
+            self.assertEqual(self.request("/api/admin/points/add", body, admin=True)[0], 500)
+            with app.db() as connection:
+                self.assertIsNone(connection.execute("SELECT * FROM points_wallets WHERE user_id='77'").fetchone())
+                connection.execute("DROP TRIGGER reject_admin_credit")
+            self.assertEqual(self.request("/api/admin/points/add", body, admin=True)[1]["wallet"]["balance"], 10)
+            with app.db() as connection:
+                connection.execute("UPDATE points_wallets SET balance=? WHERE user_id='77'", (credits.MAX_POINTS,))
+            self.assertEqual(self.request("/api/admin/points/add", dict(body, request_id="admin-credit-overflow-77"), admin=True)[0], 400)
+        self.assertEqual(self.request("/api/shop", user=77)[1]["wallet"]["balance"], credits.MAX_POINTS)
 
     def test_intermediate_ldc_history_preserved_without_minting_points(self):
         with app.db() as connection:

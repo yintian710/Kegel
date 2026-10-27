@@ -49,17 +49,18 @@
             </p>
 
             <form id="donationForm">
-              <label class="form-label" for="donationAmount">赞助金额 (LDC)</label>
+              <label class="form-label" for="donationAmount">自定义赞助金额 (LDC)</label>
               <div style="display: flex; gap: 12px; align-items: center;">
-                <input id="donationAmount" class="input-text" type="number" min="0.01" max="10000" step="0.01" value="10.00" inputmode="decimal" required style="font-size: 18px; font-weight: 700; max-width: 200px;" />
+                <input id="donationAmount" class="input-text" type="number" min="0.01" max="10000" step="0.01" placeholder="输入金额" inputmode="decimal" required aria-describedby="donationAmountHelp" style="font-size: 18px; font-weight: 700; max-width: 200px;" />
                 <button id="sponsorSubmitBtn" class="btn-primary" type="submit">赞助 LDC →</button>
               </div>
+              <p id="donationAmountHelp" style="font-size: 12px; color: var(--text-muted);">可自行输入 0.01–10000.00 LDC，最多两位小数；下方金额仅供快捷选择。</p>
 
               <!-- Quick chips -->
               <div class="amount-chips">
                 <button type="button" class="amount-chip" data-amount="1.00">1 LDC</button>
                 <button type="button" class="amount-chip" data-amount="5.00">5 LDC</button>
-                <button type="button" class="amount-chip selected" data-amount="10.00">10 LDC</button>
+                <button type="button" class="amount-chip" data-amount="10.00">10 LDC</button>
                 <button type="button" class="amount-chip" data-amount="50.00">50 LDC</button>
                 <button type="button" class="amount-chip" data-amount="100.00">100 LDC</button>
               </div>

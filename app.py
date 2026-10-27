@@ -80,7 +80,7 @@ _PAYMENT_LOG_LOCK = threading.Lock()
 _PAYMENT_SECRET_FIELDS = {
     "authorization", "proxy-authorization", "cookie", "set-cookie", "sign", "key",
     "client_secret", "access_token", "refresh_token", "id_token", "secret", "token",
-    "x-admin-token", "x-trigger-token",
+    "x-admin-token", "x-trigger-token", "secondary_secret",
 }
 
 
@@ -91,6 +91,11 @@ def _redact_payment_log(value):
     if isinstance(value, (list, tuple)):
         return [_redact_payment_log(item) for item in value]
     if isinstance(value, str):
+        if value.lstrip().startswith(("{", "[")):
+            try:
+                return json.dumps(_redact_payment_log(json.loads(value)), ensure_ascii=False)
+            except (ValueError, RecursionError):
+                pass
         if "?" in value and (value.startswith("/") or value.startswith(("http://", "https://"))):
             try:
                 parsed = urllib.parse.urlsplit(value)
@@ -106,7 +111,7 @@ def _redact_payment_log(value):
         )
         value = re.sub(r"(https?://)[^/@\s]+@", r"\1[REDACTED]@", value)
         for name in ("LDC_CLIENT_SECRET", "LINUXDO_CLIENT_SECRET", "APP_SECRET", "ADMIN_TOKEN",
-                     "CHECKIN_TRIGGER_TOKEN", "CHECKIN_CONDITION_TOKEN"):
+                     "CHECKIN_TRIGGER_TOKEN", "CHECKIN_CONDITION_TOKEN", "ADMIN_POINTS_PASSWORD_HASH"):
             secret = os.environ.get(name, "")
             if secret:
                 value = value.replace(secret, "[REDACTED]")
@@ -400,6 +405,42 @@ def status_view(connection, user: dict | None, now: float, subject: str = "") ->
             "entry": entry_view(entry), "session": session_view(session, now), "review": dict(review) if review else None,
             "leaderboard": [dict(row) for row in connection.execute("SELECT rank,username,amount,reward_status FROM entries WHERE day=? ORDER BY rank LIMIT 50", (day["day"],))]}
 
+def admin_users(connection, query: str) -> list[dict]:
+    if not isinstance(query, str) or not 1 <= len(query.strip()) <= 128:
+        raise APIError("请输入用户名或用户 ID（最多 128 字符）")
+    query = query.strip().removeprefix("@")
+    if not query:
+        raise APIError("请输入用户名或用户 ID")
+    rows = connection.execute("""WITH known AS (
+        SELECT user_id,username,1 AS priority,0 AS seen_at FROM points_wallets
+        UNION ALL SELECT subject,username,0,created_at FROM visits
+        UNION ALL SELECT user_id,username,0,completed_at FROM entries
+        UNION ALL SELECT user_id,username,0,created_at FROM donation_orders
+    ), ranked AS (
+        SELECT user_id,username,ROW_NUMBER() OVER (
+            PARTITION BY user_id ORDER BY priority DESC,seen_at DESC,username
+        ) AS position FROM known
+        WHERE user_id<>'' AND user_id NOT GLOB '*[^0-9]*'
+    ) SELECT ranked.user_id,ranked.username,COALESCE(wallet.balance,0) AS balance
+      FROM ranked LEFT JOIN points_wallets AS wallet USING(user_id)
+      WHERE position=1 AND (ranked.user_id=? OR instr(lower(ranked.username),lower(?))>0)
+      ORDER BY (ranked.user_id=?) DESC,ranked.username,ranked.user_id LIMIT 50""", (query, query, query))
+    return [dict(row) for row in rows]
+
+
+def verify_admin_points_secret(value) -> None:
+    configured = os.environ.get("ADMIN_POINTS_PASSWORD_HASH", "").strip()
+    parts = configured.split("$")
+    if (len(parts) != 4 or parts[0] != "pbkdf2_sha256" or parts[1] != "600000"
+            or not re.fullmatch(r"[0-9a-f]{32}", parts[2]) or not re.fullmatch(r"[0-9a-f]{64}", parts[3])):
+        raise APIError("未配置有效的加积分二级密码哈希", 503)
+    if not isinstance(value, str) or not value or len(value) > 1024:
+        raise APIError("请输入有效的二级密码", 403)
+    digest = hashlib.pbkdf2_hmac("sha256", value.encode("utf-8"), bytes.fromhex(parts[2]), 600000).hex()
+    if not hmac.compare_digest(digest, parts[3]):
+        raise APIError("二级密码不正确", 403)
+
+
 def dispatch_ldc(order_no: str, user: dict, amount: str) -> tuple[str, str, str]:
     """Auto delivers LDC to user using Linux DO Credit /lpay/distribute."""
     client_id = os.environ.get("LDC_CLIENT_ID", "").strip()
@@ -453,7 +494,7 @@ class AppHandler(SimpleHTTPRequestHandler):
         self.payment_log_id = None
         self.payment_response_body = ""
         path = urllib.parse.urlsplit(self.path).path
-        if path in {"/api/shop", "/api/shop/purchase", "/api/donations/create", "/api/donations", "/payments/ldc/notify"}:
+        if path in {"/api/shop", "/api/shop/purchase", "/api/donations/create", "/api/donations", "/payments/ldc/notify", "/api/admin/points/add"}:
             self.payment_log_id = secrets.token_hex(12)
             payment_log("inbound.request", exchange_id=self.payment_log_id, method=self.command,
                         url=self.path, headers={key: self.headers.get_all(key) for key in self.headers.keys()})
@@ -588,6 +629,14 @@ class AppHandler(SimpleHTTPRequestHandler):
                               "oauth_ready": bool(os.environ.get("LINUXDO_CLIENT_ID") and os.environ.get("LINUXDO_CLIENT_SECRET"))}
                     result.update(donations.shop_data(connection, user, APP_BASE_URL))
                 self.json_response(result)
+            elif parsed.path == "/api/admin/users":
+                self.require_admin()
+                query = urllib.parse.parse_qs(parsed.query, keep_blank_values=True)
+                if len(query.get("q", [])) != 1:
+                    raise APIError("请输入用户名或用户 ID")
+                with db() as connection:
+                    users = admin_users(connection, query["q"][0])
+                self.json_response({"ok": True, "users": users})
             elif parsed.path == "/api/admin":
                 self.require_admin()
                 with db() as connection:
@@ -607,6 +656,7 @@ class AppHandler(SimpleHTTPRequestHandler):
                     products = catalog.list_products(connection, today=state["day"], include_inactive=True)
                     purchases = catalog.all_purchases(connection, SITE_TZ)
                     result = {"ok": True, "settings": settings(connection), "status": state, "visits": visits, "rewards": rewards, "wallets": wallets, "practice_triggers": triggers, "products": products, "purchases": purchases}
+                    result["admin_credit_enabled"] = bool(os.environ.get("ADMIN_POINTS_PASSWORD_HASH", "").strip())
                 self.json_response(result)
             elif parsed.path == "/payments/ldc/notify":
                 try:
@@ -830,6 +880,25 @@ class AppHandler(SimpleHTTPRequestHandler):
                 changed = connection.execute("UPDATE reviews SET approved=1 WHERE day=? AND user_id=?", (day_key(), body["user_id"])).rowcount
                 if not changed:
                     raise APIError("没有找到待审核记录", 404)
+        elif path == "/api/admin/points/add":
+            verify_admin_points_secret(body.get("secondary_secret"))
+            user_id = body.get("user_id")
+            request_id = body.get("request_id")
+            if not isinstance(user_id, str) or not user_id.isascii() or not user_id.isdecimal():
+                raise APIError("请选择有效用户")
+            if not isinstance(request_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{16,128}", request_id):
+                raise APIError("加积分操作编号格式错误")
+            with db() as connection:
+                connection.execute("BEGIN IMMEDIATE")
+                user = next((item for item in admin_users(connection, user_id) if item["user_id"] == user_id), None)
+                if not user:
+                    raise APIError("没有找到此用户", 404)
+                entry = credits.grant_points(connection, {"id": user_id, "username": user["username"]},
+                                            body.get("amount"), request_id, time.time())
+                wallet = credits.wallet_view(connection, user_id)
+            self.json_response({"ok": True, "user": {"id": user_id, "username": user["username"]},
+                                "wallet": wallet, "entry": entry})
+            return
         else:
             raise APIError("管理接口不存在", 404)
         self.json_response({"ok": True})
@@ -864,6 +933,11 @@ class AppHandler(SimpleHTTPRequestHandler):
         profile = profile.get("data", profile)
         if not str(profile.get("id", "")).isdigit() or not isinstance(profile.get("username"), str) or not profile["username"]:
             raise APIError("登录服务返回的用户身份不完整", 502)
+        with db() as connection:
+            connection.execute(
+                "INSERT INTO points_wallets(user_id,username) VALUES (?,?) ON CONFLICT(user_id) DO UPDATE SET username=excluded.username",
+                (str(profile["id"]), profile["username"]),
+            )
         session = sign_payload({"purpose": "session", "id": str(profile["id"]), "username": profile["username"], "name": profile.get("name"), "exp": time.time() + LOGIN_SESSION_SECONDS})
         self.send_response(303)
         self.send_header("Set-Cookie", self.cookie("linuxdo_session", session, LOGIN_SESSION_SECONDS))
