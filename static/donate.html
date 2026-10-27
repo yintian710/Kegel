@@ -76,60 +76,66 @@
           </div>
 
           <!-- My donations list -->
-          <div class="card">
-            <div class="card-header-line">
-              <h2 class="card-title">我的赞助记录</h2>
-              <span id="myOrdersNote" class="card-subtitle">登录后查看个人赞助订单</span>
+          <details class="card card-collapse" open>
+            <summary class="collapse-summary">
+              <h2 class="card-title">我的赞助记录 <span id="myOrdersNote" class="card-subtitle">登录后查看个人赞助订单</span></h2>
+              <svg class="collapse-chevron" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </summary>
+            <div class="collapse-body">
+              <div class="table-wrap" style="max-height: 380px;">
+                <table class="data-table">
+                  <thead>
+                    <tr>
+                      <th>时间</th>
+                      <th>赞助金额</th>
+                      <th>状态</th>
+                      <th>订单号</th>
+                    </tr>
+                  </thead>
+                  <tbody id="myDonationsRows">
+                    <tr>
+                      <td colspan="4" style="text-align: center; color: var(--text-dim); padding: 24px;">登录后可查看自己的赞助记录</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
             </div>
-            <div class="table-wrap">
-              <table class="data-table">
-                <thead>
-                  <tr>
-                    <th>时间</th>
-                    <th>赞助金额</th>
-                    <th>状态</th>
-                    <th>订单号</th>
-                  </tr>
-                </thead>
-                <tbody id="myDonationsRows">
-                  <tr>
-                    <td colspan="4" style="text-align: center; color: var(--text-dim); padding: 24px;">登录后可查看自己的赞助记录</td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-          </div>
+          </details>
         </div>
 
         <!-- Right: Public Leaderboard -->
         <div>
-          <div class="card">
-            <div class="card-header-line">
-              <div>
+          <details class="card card-collapse" open>
+            <summary class="collapse-summary">
+              <div style="display: flex; align-items: baseline; gap: 8px;">
                 <h2 class="card-title">LDC 赞助榜</h2>
-                <span class="card-subtitle">按已确认到账的 LDC 总额排序，仅包含核验记录</span>
+                <span class="card-subtitle">按已确认到账总额排序</span>
               </div>
-              <button id="refreshBoardBtn" class="btn-secondary" type="button" style="padding: 6px 14px; font-size: 12px;">刷新榜单</button>
+              <div style="display: flex; align-items: center; gap: 10px;">
+                <button id="refreshBoardBtn" class="btn-secondary" type="button" style="padding: 5px 12px; font-size: 12px;" onclick="event.stopPropagation()">刷新榜单</button>
+                <svg class="collapse-chevron" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              </div>
+            </summary>
+            <div class="collapse-body">
+              <div class="table-wrap" style="max-height: 600px;">
+                <table class="rank-table">
+                  <thead>
+                    <tr>
+                      <th>排名</th>
+                      <th>用户名</th>
+                      <th>赞助总额</th>
+                      <th>次数</th>
+                    </tr>
+                  </thead>
+                  <tbody id="donationBoardRows">
+                    <tr>
+                      <td colspan="4" style="text-align: center; color: var(--text-dim); padding: 32px;">正在读取赞助榜…</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
             </div>
-
-            <div class="table-wrap">
-              <table class="rank-table">
-                <thead>
-                  <tr>
-                    <th>排名</th>
-                    <th>用户名</th>
-                    <th>赞助总额</th>
-                    <th>次数</th>
-                  </tr>
-                </thead>
-                <tbody id="donationBoardRows">
-                  <tr>
-                    <td colspan="4" style="text-align: center; color: var(--text-dim); padding: 32px;">正在读取赞助榜…</td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-          </div>
+          </details>
         </div>
       </div>
     </main>

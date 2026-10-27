@@ -383,18 +383,21 @@ button:disabled {
   align-items: start;
 }
 
-/* Collapsible card (rules + quota) */
+/* Collapsible card (native details/summary accordion) */
 .card-collapse {
   padding: 0;
+  overflow: hidden;
 }
-/* Specificity beats .card-header-line declared later */
 .card-collapse > .collapse-summary {
   list-style: none;
   cursor: pointer;
+  display: flex;
   align-items: center;
+  justify-content: space-between;
   margin: 0;
   padding: 20px 24px;
   gap: 12px;
+  user-select: none;
   border-radius: var(--radius);
   transition: background-color 0.15s ease;
 }
@@ -409,9 +412,9 @@ button:disabled {
   outline-offset: -2px;
 }
 .collapse-chevron {
-  width: 16px;
-  height: 16px;
-  flex: none;
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
   color: var(--text-dim);
   transition: transform 0.2s ease;
 }
@@ -421,11 +424,14 @@ button:disabled {
 .collapse-body {
   padding: 0 24px 24px;
 }
+
 .card-header-line {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   justify-content: space-between;
   margin-bottom: 20px;
+  gap: 12px;
+  flex-wrap: wrap;
 }
 .card-title {
   font-size: 18px;
@@ -445,22 +451,29 @@ button:disabled {
   width: 100%;
   border-collapse: collapse;
   font-size: 14px;
+  min-width: 320px;
 }
-.rank-table th {
+.rank-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--bg-subtle);
+  box-shadow: 0 1px 0 var(--border);
   text-align: left;
   font-size: 12px;
-  font-weight: 500;
+  font-weight: 600;
   color: var(--text-dim);
-  padding: 8px 12px;
-  border-bottom: 1px solid var(--border-light);
+  padding: 10px 14px;
+  white-space: nowrap;
 }
 .rank-table th:last-child {
   text-align: right;
 }
 .rank-table td {
-  padding: 12px;
+  padding: 12px 14px;
   border-bottom: 1px solid var(--border-light);
   color: var(--text-main);
+  white-space: nowrap;
 }
 .rank-table td:last-child {
   text-align: right;
@@ -751,38 +764,80 @@ button:disabled {
   color: var(--text-dim);
 }
 
-/* Modern Tables */
+/* Modern Tables & Custom Scrollbars */
 .table-wrap {
+  max-height: 400px;
   overflow-x: auto;
-  border-radius: var(--radius);
+  overflow-y: auto;
+  border-radius: var(--radius-sm);
   border: 1px solid var(--border);
   background: #ffffff;
+  scrollbar-width: thin;
+  scrollbar-color: #cbd5e1 transparent;
+  -webkit-overflow-scrolling: touch;
 }
+.table-wrap::-webkit-scrollbar, .data-scroll-box::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+.table-wrap::-webkit-scrollbar-thumb, .data-scroll-box::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 9999px;
+}
+.table-wrap::-webkit-scrollbar-track, .data-scroll-box::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.data-scroll-box {
+  max-height: 640px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-right: 4px;
+  scrollbar-width: thin;
+  scrollbar-color: #cbd5e1 transparent;
+}
+
 .data-table {
   width: 100%;
   border-collapse: collapse;
   font-size: 14px;
   text-align: left;
 }
-.data-table th {
+.data-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
   background: var(--bg-subtle);
+  box-shadow: 0 1px 0 var(--border);
   padding: 12px 16px;
   font-size: 12px;
   font-weight: 600;
   color: var(--text-muted);
-  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
 }
 .data-table td {
-  padding: 14px 16px;
+  padding: 13px 16px;
   border-bottom: 1px solid var(--border-light);
+  white-space: nowrap;
+}
+.data-table td.cell-wrap {
+  white-space: normal;
+  word-break: break-word;
+  min-width: 120px;
+  max-width: 240px;
 }
 .data-table tr:last-child td {
   border-bottom: none;
 }
 .data-table tr:hover td {
-  background: #fafafa;
+  background: #f8fafc;
 }
 
+/* Prevent accidental wrap on badges, pills, buttons, and keys */
+.status-pill, .product-badge, .brand-badge, .rank-badge, .amount-chip, .btn-primary, .btn-secondary, .user-btn {
+  white-space: nowrap;
+  flex-shrink: 0;
+}
 /* Forms */
 .form-group {
   margin-bottom: 18px;

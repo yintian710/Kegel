@@ -96,66 +96,88 @@
           <h2 style="font-size: 20px; font-weight: 700; margin: 0 0 16px 0;">规则配置</h2>
           <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 20px;">
             <!-- Settings Form -->
-            <div class="card">
-              <h3 style="font-size: 16px; font-weight: 700; margin: 0 0 16px 0;">基础参数设置</h3>
-              <form id="settingsForm">
-                <div class="form-group">
-                  <label class="form-label" for="deadline">最晚开放时间 (HH:MM)</label>
-                  <input id="deadline" class="input-text" type="time" required />
-                </div>
-                <div class="form-group">
-                  <label class="form-label" for="minStepSeconds">每组最短秒数 (1-300)</label>
-                  <input id="minStepSeconds" class="input-text" type="number" min="1" max="300" required />
-                </div>
-                <div class="form-group">
-                  <label class="form-label" for="conditionUrl">提前开启条件 URL (可选)</label>
-                  <input id="conditionUrl" class="input-text" type="url" placeholder="https://example.com/checkin-condition" />
-                  <p style="font-size: 12px; color: var(--text-dim); margin: 4px 0 0 0;">返回 {"open": true} 时自动提前开放今日打卡。</p>
-                </div>
-                <button class="btn-primary" type="submit" style="width: 100%;">保存基础规则</button>
-              </form>
-            </div>
+            <details class="card card-collapse" open>
+              <summary class="collapse-summary">
+                <h3 class="card-title">基础参数设置</h3>
+                <svg class="collapse-chevron" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              </summary>
+              <div class="collapse-body">
+                <form id="settingsForm">
+                  <div class="form-group">
+                    <label class="form-label" for="deadline">最晚开放时间 (HH:MM)</label>
+                    <input id="deadline" class="input-text" type="time" required />
+                  </div>
+                  <div class="form-group">
+                    <label class="form-label" for="minStepSeconds">每组最短秒数 (1-300)</label>
+                    <input id="minStepSeconds" class="input-text" type="number" min="1" max="300" required />
+                  </div>
+                  <div class="form-group">
+                    <label class="form-label" for="dailyPointsLimit">全站每日积分总额度</label>
+                    <input id="dailyPointsLimit" class="input-text" type="number" min="0" max="100000000" required />
+                    <p id="dailyQuotaStatus" style="font-size: 12px; color: var(--text-dim); margin: 4px 0 0 0;"></p>
+                  </div>
+                  <div class="form-group">
+                    <label class="form-label" for="conditionUrl">提前开启条件 URL (可选)</label>
+                    <input id="conditionUrl" class="input-text" type="url" placeholder="https://example.com/checkin-condition" />
+                    <p style="font-size: 12px; color: var(--text-dim); margin: 4px 0 0 0;">返回 {"open": true} 时自动提前开放今日打卡。</p>
+                  </div>
+                  <button class="btn-primary" type="submit" style="width: 100%;">保存基础规则</button>
+                </form>
+              </div>
+            </details>
 
             <!-- Rewards Form -->
-            <div class="card">
-              <h3 style="font-size: 16px; font-weight: 700; margin: 0 0 8px 0;">排名奖励配置</h3>
-              <p style="font-size: 12px; color: var(--text-muted); margin: 0 0 16px 0;">按截止名次递增，未覆盖名次无奖励。</p>
-              <form id="rewardsForm">
-                <table class="data-table" style="margin-bottom: 16px;">
-                  <thead>
-                    <tr>
-                      <th>截止名次</th>
-                      <th>奖励积分</th>
-                      <th>操作</th>
-                    </tr>
-                  </thead>
-                  <tbody id="rewardRows"></tbody>
-                </table>
-                <div style="display: flex; gap: 10px;">
-                  <button id="addTierButton" class="btn-secondary" type="button" style="flex: 1;">添加档位</button>
-                  <button class="btn-primary" type="submit" style="flex: 1;">保存奖励设置</button>
-                </div>
-              </form>
-            </div>
+            <details class="card card-collapse" open>
+              <summary class="collapse-summary">
+                <h3 class="card-title">排名奖励配置</h3>
+                <svg class="collapse-chevron" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              </summary>
+              <div class="collapse-body">
+                <p style="font-size: 12px; color: var(--text-muted); margin: 0 0 16px 0;">按截止名次递增，未覆盖名次无奖励。</p>
+                <form id="rewardsForm">
+                  <div class="table-wrap" style="max-height: 280px; margin-bottom: 16px;">
+                    <table class="data-table">
+                      <thead>
+                        <tr>
+                          <th>截止名次</th>
+                          <th>奖励积分</th>
+                          <th>操作</th>
+                        </tr>
+                      </thead>
+                      <tbody id="rewardRows"></tbody>
+                    </table>
+                  </div>
+                  <div style="display: flex; gap: 10px;">
+                    <button id="addTierButton" class="btn-secondary" type="button" style="flex: 1;">添加档位</button>
+                    <button class="btn-primary" type="submit" style="flex: 1;">保存奖励设置</button>
+                  </div>
+                </form>
+              </div>
+            </details>
 
             <!-- Visits & Review -->
-            <div class="card">
-              <h3 style="font-size: 16px; font-weight: 700; margin: 0 0 8px 0;">访问频率与异常审核</h3>
-              <p style="font-size: 12px; color: var(--text-muted); margin: 0 0 16px 0;">周期性定时访问等模式会被自动标记，需人工确认。</p>
-              <div class="table-wrap">
-                <table class="data-table">
-                  <thead>
-                    <tr>
-                      <th>用户</th>
-                      <th>次数</th>
-                      <th>原因</th>
-                      <th>操作</th>
-                    </tr>
-                  </thead>
-                  <tbody id="visitRows"></tbody>
-                </table>
+            <details class="card card-collapse" open>
+              <summary class="collapse-summary">
+                <h3 class="card-title">访问频率与异常审核</h3>
+                <svg class="collapse-chevron" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              </summary>
+              <div class="collapse-body">
+                <p style="font-size: 12px; color: var(--text-muted); margin: 0 0 16px 0;">周期性定时访问等模式会被自动标记，需人工确认。</p>
+                <div class="table-wrap" style="max-height: 320px;">
+                  <table class="data-table">
+                    <thead>
+                      <tr>
+                        <th>用户</th>
+                        <th>次数</th>
+                        <th>原因</th>
+                        <th>操作</th>
+                      </tr>
+                    </thead>
+                    <tbody id="visitRows"></tbody>
+                  </table>
+                </div>
               </div>
-            </div>
+            </details>
           </div>
         </section>
 
@@ -215,69 +237,85 @@
 
             <!-- Products List Table & Purchases -->
             <div>
-              <div class="card" style="margin-bottom: 24px;">
-                <h3 style="font-size: 16px; font-weight: 700; margin: 0 0 16px 0;">商品列表 (LDC 品类)</h3>
-                <div class="table-wrap">
-                  <table class="data-table">
-                    <thead>
-                      <tr>
-                        <th>ID</th>
-                        <th>品类</th>
-                        <th>名称</th>
-                        <th>售价</th>
-                        <th>发货数量</th>
-                        <th>每日限购</th>
-                        <th>状态</th>
-                        <th>操作</th>
-                      </tr>
-                    </thead>
-                    <tbody id="productRows"></tbody>
-                  </table>
+              <details class="card card-collapse" open style="margin-bottom: 24px;">
+                <summary class="collapse-summary">
+                  <h3 class="card-title">商品列表 (LDC 品类)</h3>
+                  <svg class="collapse-chevron" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                </summary>
+                <div class="collapse-body">
+                  <div class="table-wrap" style="max-height: 380px;">
+                    <table class="data-table">
+                      <thead>
+                        <tr>
+                          <th>ID</th>
+                          <th>品类</th>
+                          <th>名称</th>
+                          <th>售价</th>
+                          <th>发货数量</th>
+                          <th>每日限购</th>
+                          <th>状态</th>
+                          <th>操作</th>
+                        </tr>
+                      </thead>
+                      <tbody id="productRows"></tbody>
+                    </table>
+                  </div>
                 </div>
-              </div>
+              </details>
 
-              <div class="card">
-                <h3 style="font-size: 16px; font-weight: 700; margin: 0 0 8px 0;">自动发货与兑换记录</h3>
-                <p style="font-size: 12px; color: var(--text-muted); margin: 0 0 16px 0;">用户积分购买商品后的实时发货流水状态。</p>
-                <div class="table-wrap" style="max-height: 420px; overflow-y: auto;">
-                  <table class="data-table">
-                    <thead>
-                      <tr>
-                        <th>订单号</th>
-                        <th>用户</th>
-                        <th>商品 / LDC</th>
-                        <th>消耗积分</th>
-                        <th>发货状态</th>
-                        <th>单号 / 错误</th>
-                        <th>时间</th>
-                      </tr>
-                    </thead>
-                    <tbody id="purchaseRows"></tbody>
-                  </table>
+              <details class="card card-collapse" open>
+                <summary class="collapse-summary">
+                  <div>
+                    <h3 class="card-title">自动发货与兑换记录</h3>
+                    <span class="card-subtitle">用户积分购买商品后的实时发货流水状态</span>
+                  </div>
+                  <svg class="collapse-chevron" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                </summary>
+                <div class="collapse-body">
+                  <div class="table-wrap" style="max-height: 420px;">
+                    <table class="data-table">
+                      <thead>
+                        <tr>
+                          <th>订单号</th>
+                          <th>用户</th>
+                          <th>商品 / LDC</th>
+                          <th>消耗积分</th>
+                          <th>发货状态</th>
+                          <th>单号 / 错误</th>
+                          <th>时间</th>
+                        </tr>
+                      </thead>
+                      <tbody id="purchaseRows"></tbody>
+                    </table>
+                  </div>
                 </div>
-              </div>
-            </div>
+              </details>
           </div>
         </section>
 
         <!-- Section Practice Triggers -->
         <section id="sec-triggers" style="margin-bottom: 36px;">
-          <h2 style="font-size: 20px; font-weight: 700; margin: 0 0 16px 0;">每组练习的触发时间记录</h2>
-          <div class="card">
-            <div class="table-wrap">
-              <table class="data-table">
-                <thead>
-                  <tr>
-                    <th>用户</th>
-                    <th>组次</th>
-                    <th>触发时间</th>
-                    <th>本轮标识</th>
-                  </tr>
-                </thead>
-                <tbody id="practiceRows"></tbody>
-              </table>
+          <details class="card card-collapse" open>
+            <summary class="collapse-summary">
+              <h2 class="card-title">每组练习的触发时间记录 <span class="card-subtitle">最近 200 条服务端触发打点</span></h2>
+              <svg class="collapse-chevron" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </summary>
+            <div class="collapse-body">
+              <div class="table-wrap" style="max-height: 400px;">
+                <table class="data-table">
+                  <thead>
+                    <tr>
+                      <th>用户</th>
+                      <th>组次</th>
+                      <th>触发时间</th>
+                      <th>本轮标识</th>
+                    </tr>
+                  </thead>
+                  <tbody id="practiceRows"></tbody>
+                </table>
+              </div>
             </div>
-          </div>
+          </details>
         </section>
 
         <!-- Section Records: Rewards & User Wallets -->
@@ -285,46 +323,56 @@
           <h2 style="font-size: 20px; font-weight: 700; margin: 0 0 16px 0;">记录查询</h2>
           <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
             <!-- Rewards History -->
-            <div class="card">
-              <h3 style="font-size: 16px; font-weight: 700; margin: 0 0 16px 0;">每日奖励领取记录</h3>
-              <div class="table-wrap" style="max-height: 480px; overflow-y: auto;">
-                <table class="data-table">
-                  <thead>
-                    <tr>
-                      <th>日期 / 排名</th>
-                      <th>用户</th>
-                      <th>积分</th>
-                      <th>领取状态</th>
-                      <th>领取时间</th>
-                    </tr>
-                  </thead>
-                  <tbody id="rewardHistoryRows"></tbody>
-                </table>
+            <details class="card card-collapse" open>
+              <summary class="collapse-summary">
+                <h3 class="card-title">每日奖励领取记录</h3>
+                <svg class="collapse-chevron" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              </summary>
+              <div class="collapse-body">
+                <div class="table-wrap" style="max-height: 420px;">
+                  <table class="data-table">
+                    <thead>
+                      <tr>
+                        <th>日期 / 排名</th>
+                        <th>用户</th>
+                        <th>积分</th>
+                        <th>领取状态</th>
+                        <th>领取时间</th>
+                      </tr>
+                    </thead>
+                    <tbody id="rewardHistoryRows"></tbody>
+                  </table>
+                </div>
               </div>
-            </div>
+            </details>
 
             <!-- User Wallets -->
-            <div class="card">
-              <h3 style="font-size: 16px; font-weight: 700; margin: 0 0 16px 0;">用户积分余额</h3>
-              <p id="adminCreditStatus" style="font-size: 13px; color: var(--text-muted);"></p>
-              <form id="userSearchForm" style="display: flex; gap: 8px; margin-bottom: 16px;">
-                <input id="userSearchQuery" class="input-text" type="search" maxlength="128" required aria-label="用户名或用户 ID" placeholder="搜索用户名或用户 ID" />
-                <button class="btn-secondary" type="submit" style="flex-shrink: 0; white-space: nowrap;">搜索</button>
-              </form>
-              <p id="userSearchStatus" style="font-size: 12px; color: var(--text-dim);" role="status"></p>
-              <div class="table-wrap" style="max-height: 480px; overflow-y: auto;">
-                <table class="data-table">
-                  <thead>
-                    <tr>
-                      <th>用户</th>
-                      <th>站内积分余额</th>
-                      <th>操作</th>
-                    </tr>
-                  </thead>
-                  <tbody id="walletRows"></tbody>
-                </table>
+            <details class="card card-collapse" open>
+              <summary class="collapse-summary">
+                <h3 class="card-title">用户积分余额</h3>
+                <svg class="collapse-chevron" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              </summary>
+              <div class="collapse-body">
+                <p id="adminCreditStatus" style="font-size: 13px; color: var(--text-muted);"></p>
+                <form id="userSearchForm" style="display: flex; gap: 8px; margin-bottom: 16px;">
+                  <input id="userSearchQuery" class="input-text" type="search" maxlength="128" required aria-label="用户名或用户 ID" placeholder="搜索用户名或用户 ID" />
+                  <button class="btn-secondary" type="submit" style="flex-shrink: 0; white-space: nowrap;">搜索</button>
+                </form>
+                <p id="userSearchStatus" style="font-size: 12px; color: var(--text-dim);" role="status"></p>
+                <div class="table-wrap" style="max-height: 420px;">
+                  <table class="data-table">
+                    <thead>
+                      <tr>
+                        <th>用户</th>
+                        <th>站内积分余额</th>
+                        <th>操作</th>
+                      </tr>
+                    </thead>
+                    <tbody id="walletRows"></tbody>
+                  </table>
+                </div>
               </div>
-            </div>
+            </details>
           </div>
         </section>
       </main>

@@ -66,72 +66,80 @@
           </div>
 
           <!-- Exchange & Dispatch Orders Table -->
-          <div class="card" style="margin-bottom: 24px;">
-            <div class="card-header-line">
-              <h2 class="card-title">兑换与自动发货记录</h2>
-              <span class="card-subtitle">仅显示当前账户兑换流水</span>
+          <details class="card card-collapse" open style="margin-bottom: 24px;">
+            <summary class="collapse-summary">
+              <h2 class="card-title">兑换与自动发货记录 <span class="card-subtitle">仅显示当前账户兑换流水</span></h2>
+              <svg class="collapse-chevron" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </summary>
+            <div class="collapse-body">
+              <div class="table-wrap" style="max-height: 360px;">
+                <table class="data-table">
+                  <thead>
+                    <tr>
+                      <th>时间</th>
+                      <th>商品</th>
+                      <th>消耗积分</th>
+                      <th>发货状态</th>
+                    </tr>
+                  </thead>
+                  <tbody id="purchasesRows">
+                    <tr>
+                      <td colspan="4" style="text-align: center; color: var(--text-dim); padding: 20px;">正在加载兑换记录…</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
             </div>
-            <div class="table-wrap">
-              <table class="data-table">
-                <thead>
-                  <tr>
-                    <th>时间</th>
-                    <th>商品</th>
-                    <th>消耗积分</th>
-                    <th>发货状态</th>
-                  </tr>
-                </thead>
-                <tbody id="purchasesRows">
-                  <tr>
-                    <td colspan="4" style="text-align: center; color: var(--text-dim); padding: 20px;">正在加载兑换记录…</td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-          </div>
+          </details>
 
           <!-- Points Ledger -->
-          <div class="card">
-            <div class="card-header-line">
-              <h2 class="card-title">积分变动流水</h2>
-              <span class="card-subtitle">每日打卡奖励与兑换明细</span>
+          <details class="card card-collapse" open>
+            <summary class="collapse-summary">
+              <h2 class="card-title">积分变动流水 <span class="card-subtitle">每日打卡奖励与兑换明细</span></h2>
+              <svg class="collapse-chevron" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </summary>
+            <div class="collapse-body">
+              <div class="table-wrap" style="max-height: 360px;">
+                <table class="data-table">
+                  <thead>
+                    <tr>
+                      <th>时间</th>
+                      <th>类型</th>
+                      <th>积分变动</th>
+                      <th>变动后余额</th>
+                    </tr>
+                  </thead>
+                  <tbody id="ledgerRows">
+                    <tr>
+                      <td colspan="4" style="text-align: center; color: var(--text-dim); padding: 20px;">正在读取流水记录…</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
             </div>
-            <div class="table-wrap">
-              <table class="data-table">
-                <thead>
-                  <tr>
-                    <th>时间</th>
-                    <th>类型</th>
-                    <th>积分变动</th>
-                    <th>变动后余额</th>
-                  </tr>
-                </thead>
-                <tbody id="ledgerRows">
-                  <tr>
-                    <td colspan="4" style="text-align: center; color: var(--text-dim); padding: 20px;">正在读取流水记录…</td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-          </div>
+          </details>
         </div>
 
         <!-- Right: Product Catalog Grid -->
         <div>
-          <div class="card">
-            <div class="card-header-line">
+          <details class="card card-collapse" open>
+            <summary class="collapse-summary">
               <div>
                 <h2 class="card-title">商品兑换</h2>
                 <span class="card-subtitle">全自动转账到账，每日限购保障社区公平</span>
               </div>
-            </div>
-
-            <div id="productsGrid" class="products-grid">
-              <div style="grid-column: 1 / -1; text-align: center; padding: 40px 0; color: var(--text-dim);">
-                正在加载商品…
+              <svg class="collapse-chevron" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </summary>
+            <div class="collapse-body">
+              <div class="data-scroll-box" style="max-height: 760px;">
+                <div id="productsGrid" class="products-grid">
+                  <div style="grid-column: 1 / -1; text-align: center; padding: 40px 0; color: var(--text-dim);">
+                    正在加载商品…
+                  </div>
+                </div>
               </div>
             </div>
-          </div>
+          </details>
         </div>
       </div>
     </main>
