@@ -534,8 +534,8 @@ class AppHandler(SimpleHTTPRequestHandler):
                 self.send_header("Set-Cookie", self.cookie("linuxdo_session", "", 0))
                 self.send_header("Location", "/")
                 self.end_headers()
-            elif parsed.path in {"/", "/admin", "/shop", "/donate", "/index.html", "/admin.html", "/shop.html", "/donate.html", "/app.js", "/admin.js", "/shop.js", "/donate.js", "/styles.css", "/favicon.svg"} or re.fullmatch(r"/img/[A-Za-z0-9_-]+\.(?:png|svg|webp)", parsed.path):
-                self.path = {"/": "/index.html", "/admin": "/admin.html", "/shop": "/shop.html", "/donate": "/donate.html"}.get(parsed.path, parsed.path)
+            elif parsed.path in {"/", "/admin", "/shop", "/donate", "/index.html", "/admin.html", "/shop.html", "/donate.html", "/app.js", "/admin.js", "/shop.js", "/donate.js", "/styles.css", "/favicon.svg", "/favicon.ico"} or re.fullmatch(r"/img/[A-Za-z0-9_-]+\.(?:png|svg|webp)", parsed.path):
+                self.path = {"/": "/index.html", "/admin": "/admin.html", "/shop": "/shop.html", "/donate": "/donate.html", "/favicon.ico": "/img/icon-32.png"}.get(parsed.path, parsed.path)
                 super().do_GET()
             else:
                 raise APIError("页面或接口不存在", 404)

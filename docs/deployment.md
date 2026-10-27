@@ -1,0 +1,171 @@
+# 生产部署与运维指南
+
+本文档提供 **Kegel** 系统的生产环境部署规范、反向代理配置、安全加固及数据备份方案。
+
+---
+
+## 1. 运行环境要求
+
+- **操作系统**：Linux (Ubuntu 22.04 / Debian 12 / AlmaLinux 9 等推荐) / macOS
+- **Python 环境**：`Python >= 3.14`（推荐使用 `uv` 管理）
+- **外网条件**：
+  - 需要能够正常出网访问 `connect.linux.do` 和 `credit.linux.do`
+  - 生产环境必须拥有已解析的域名并配置 **HTTPS 证书**
+
+---
+
+## 2. 环境变量配置清单 (`.env`)
+
+在项目根目录下复制 `.env.example` 为 `.env` 并按需配置：
+
+```bash
+# 1. 存储与网络
+CHECKIN_DB=checkin.db
+HOST=127.0.0.1
+PORT=8000
+APP_BASE_URL=https://kegel.yourdomain.com
+
+# 2. 安全与密钥 (生产环境必须设置至少 32 字符的强随机串)
+APP_SECRET=your-super-long-and-secure-random-secret-key-at-least-32-chars
+ADMIN_TOKEN=your-strong-admin-token-for-management-console
+
+# 3. LINUX DO Connect 授权配置 (用于用户登录)
+LINUXDO_CLIENT_ID=your-connect-client-id
+LINUXDO_CLIENT_SECRET=your-connect-client-secret
+LINUXDO_REDIRECT_URI=https://kegel.yourdomain.com/auth/linuxdo/callback
+
+# 4. LINUX DO Credit 平台商户配置 (用于商品自动发货与独立赞助)
+# 开启赞助功能:
+LDC_DONATION_ENABLED=true
+# 开启商品兑换真实发货 (设为 false 时为模拟发货):
+LDC_LIVE=true
+LDC_API_BASE=https://credit.linux.do
+LDC_CLIENT_ID=your-credit-merchant-id
+LDC_CLIENT_SECRET=your-credit-merchant-secret
+# 全站每日 LDC 兑换额度（整数 LDC，默认 800；0 停止兑换且不影响签到积分）:
+DAILY_LDC_LIMIT=800
+
+
+# 5. 自动化与调度
+CHECKIN_TRIGGER_TOKEN=your-optional-token-to-open-checkin-via-webhook
+CHECKIN_CONDITION_TOKEN=your-optional-bearer-token-for-condition-polling
+```
+
+修改 `DAILY_LDC_LIMIT` 后必须重启服务才能生效；额度按北京时间每日重置。
+
+---
+
+## 3. 生产反向代理配置
+
+**必须在前端挂一层反向代理（推荐 Caddy 或 Nginx）**，由其负责 TLS 证书续签、慢速连接拦截以及静态资源加速。
+
+### 3.1 Caddyfile 配置示例（最推荐，全自动申请证书）
+```caddy
+kegel.yourdomain.com {
+    encode gzip zstd
+    
+    # 限制单次请求体体积，防御大包攻击
+    request_body {
+        max_size 1MB
+    }
+
+    reverse_proxy 127.0.0.1:8000 {
+        header_up Host {host}
+        header_up X-Real-IP {remote_host}
+        header_up X-Forwarded-For {remote_host}
+        header_up X-Forwarded-Proto {scheme}
+    }
+}
+```
+
+### 3.2 Nginx 配置示例
+```nginx
+server {
+    listen 80;
+    server_name kegel.yourdomain.com;
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl http2;
+    server_name kegel.yourdomain.com;
+
+    ssl_certificate /etc/letsencrypt/live/kegel.yourdomain.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/kegel.yourdomain.com/privkey.pem;
+
+    client_max_body_size 1M;
+
+    location / {
+        proxy_pass http://127.0.0.1:8000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        # 保持连接与超时设置
+        proxy_connect_timeout 15s;
+        proxy_read_timeout 30s;
+        proxy_send_timeout 30s;
+    }
+}
+```
+
+---
+
+## 4. Systemd 守护进程服务配置
+
+在 `/etc/systemd/system/kegel.service` 创建服务文件：
+
+```ini
+[Unit]
+Description=Kegel Daily Checkin and Shop Service
+After=network.target
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/var/www/Kegel
+EnvironmentFile=/var/www/Kegel/.env
+ExecStart=/usr/local/bin/python3 app.py
+Restart=always
+RestartSec=5
+
+# 资源防护限制
+LimitNOFILE=65535
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
+```
+
+启动与自启：
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now kegel
+sudo systemctl status kegel
+```
+
+---
+
+## 5. 数据备份与维护策略
+
+系统所有状态和账本流水均持久化在单个 SQLite 文件中（默认 `checkin.db`）。
+
+### 5.1 热备份脚本 (基于 SQLite 官方安全热备)
+在 SQLite 运行期间，切勿直接 `cp` 正在处于 WAL 写入的 `.db` 文件。建议使用内置命令执行原子热备份：
+
+```bash
+# 运行原子安全热备到指定目录
+sqlite3 checkin.db "VACUUM INTO '/backup/kegel_backup_$(date +%Y%m%d_%H%M%S).db';"
+```
+可将该命令写入每日凌晨定时任务（crontab）：
+```bash
+0 3 * * * sqlite3 /var/www/Kegel/checkin.db "VACUUM INTO '/backup/kegel_$(date +\%Y\%m\%d).db';"
+```
+
+### 5.2 数据库完整性自检
+```bash
+sqlite3 checkin.db "PRAGMA integrity_check;"
+```
+输出 `ok` 即表示数据完整无损。

@@ -1,0 +1,150 @@
+# 核心业务功能与流程详解
+
+本文档详细描述 **Kegel** 系统的核心业务逻辑、状态机流转、风控机制及各页面功能。
+
+---
+
+## 1. 每日提肛练习打卡（首页 `/`）
+
+### 1.1 练习阶段流转与状态机
+
+```mermaid
+stateDiagram-v2
+    [*] --> 初始就绪: 页面加载 (仅单行大字)
+    初始就绪 --> 第1组练习: 用户主动点击 / 按键
+    
+    state 第1组练习 {
+        [*] --> 第1组倒计时: 服务端记录 group_no=1
+        第1组倒计时 --> 第1组结束待点击: 倒计时结束 (平滑淡入淡出)
+    }
+    
+    第1组结束待点击 --> 第2组练习: 用户主动点击
+    
+    state 第2组练习 {
+        [*] --> 第2组倒计时: 服务端记录 group_no=2
+        第2组倒计时 --> 第2组结束待点击: 倒计时结束 (平滑淡入淡出)
+    }
+    
+    第2组结束待点击 --> 第3组练习: 用户主动点击
+    
+    state 第3组练习 {
+        [*] --> 第3组倒计时: 服务端记录 group_no=3
+        第3组倒计时 --> 自动完成提交: 倒计时结束
+    }
+    
+    自动完成提交 --> 完成结算卡片: 调用 /api/session/complete (分配名次)
+    完成结算卡片 --> 已入账: 点击领取站内积分 (不受 LDC 兑换额度限制)
+    
+    第1组结束待点击 --> 初始就绪: 超过 10 分钟未继续 (本轮失效)
+    第2组结束待点击 --> 初始就绪: 超过 10 分钟未继续 (本轮失效)
+```
+
+### 1.2 为什么必须逐组主动点击？
+为了确保用户真实在屏幕前参与自律练习，系统设计为：
+- 倒计时结束后**绝不自动开始下一组**，而是以 CSS 动画平滑过渡至「再提一组？」或「最后一组？」，等待用户主动点击才进入下一阶段。
+- **10 分钟超时熔断**：从任何一组练习触发开始计时，如果超过 600 秒（10 分钟）仍未点击进入下一组，当前练习轮次（`flow_id`）自动作废，页面与后端状态均强制退回第一组重新开始。
+
+### 1.3 服务端防作弊时间校验
+客户端无法通过修改本地系统时钟或篡改前端 JS 绕过倒计时：
+- 每次触发组次均由客户端向后端发送凭证（`POST /api/session/start`、`POST /api/session/step`）。
+- 后端在 `practice_triggers` 表中记录当前轮次各组到达服务器的真实时间戳。
+- 最后一组完成及领奖时，后端强制校验：
+  $$\Delta t_1 = t_2 - t_1 \ge \text{min\_step\_seconds}$$
+  $$\Delta t_2 = t_3 - t_2 \ge \text{min\_step\_seconds}$$
+  $$\Delta t_3 = t_{\text{finish}} - t_3 \ge \text{min\_step\_seconds}$$
+  只要任意组间隔未达标，直接拒绝完成并报错 `429`。
+
+---
+
+## 2. 站内积分激励与全站每日 LDC 兑换限额
+
+### 2.1 阶梯排名奖励（北京时间每日重置）
+系统以 `Asia/Shanghai` 每日零点为新的一天。完成三组练习后按先后顺序分配当天唯一名次：
+- **第 1 – 10 名**：默认每人获得 `1000` 站内积分；
+- **第 11 – 20 名**：默认每人获得 `500` 站内积分；
+- **第 21 – 50 名**：默认每人获得 `100` 站内积分；
+- **第 51 名起**：记录打卡名次，无积分奖励。
+*（上述档位在管理后台支持任意增删改）*
+
+签到积分领取不受 LDC 兑换额度限制。即使每日兑换额度为 `0`，已获得的 1000、500 或 100 站内积分仍可正常领取。
+
+### 2.2 全站每日 LDC 兑换限额（默认 800 LDC）
+- **配置与重置**：环境变量 `DAILY_LDC_LIMIT` 接受整数 LDC，默认 `800`，修改后需重启服务生效；额度按北京时间每日零点重置，设为 `0` 会停止兑换，但不影响签到或领取站内积分。
+- **精确金额统计**：每笔兑换按商品的 `ldc_amount` 精确金额累计，而不是按订单数或消耗的站内积分统计；额度值统一显示为两位小数字符串。
+- **订单状态**：`pending`、`success`、`simulated` 和 `uncertain` 占用额度，`failed` 不占额度并释放原先预占金额。
+- **整笔拒绝**：商品的 LDC 金额大于 `quota.remaining` 时不能兑换，不拆分发货。
+
+---
+
+## 3. 商店 (`/shop`) 与积分兑换 LDC 自动发货
+
+### 3.1 商品品类与配置属性
+目前商店商品品类为 **LDC 积分发货**，在后台录入时包含如下属性：
+- **积分售价**：购买消耗的站内积分（如 500 分）。
+- **LDC 数量**：发货到账的 LDC 数量（如 1.00 LDC，必须保留至多两位小数）。
+- **单人每日限购数**：每个用户每天最多可兑换的次数（`0` 为不限）。
+- **全站每日总限购数**：全平台每天最多可被兑换的总次数（`0` 为不限）。
+
+### 3.2 兑换发货完整事务流程
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor User as 用户
+    participant Shop as 前端商店 /shop
+    participant Backend as 后端核心
+    participant DB as SQLite 事务
+    participant LDC as LINUX DO Credit 平台
+
+    User->>Shop: 点击「立即兑换」
+    Shop->>User: 弹出确认兑换对话框 (明示发货账号)
+    User->>Shop: 确认兑换
+    Shop->>Backend: POST /api/shop/purchase (携带 product_id)
+    
+    activate Backend
+    Backend->>DB: BEGIN IMMEDIATE
+    Backend->>DB: 1. 校验个人与全站当日限购额度
+    Backend->>DB: 2. 检查用户积分余额并扣除积分
+    Backend->>DB: 3. 记录 shop_purchases (status='pending')
+    
+    alt 配置了商户凭据且处于生产模式
+        Backend->>LDC: POST /lpay/distribute (Basic Auth, user_id, amount, out_trade_no)
+        alt 接口返回 code == 1 (转账成功)
+            LDC-->>Backend: 成功并返回 trade_no
+            Backend->>DB: UPDATE status='success', trade_no=...
+            Backend->>DB: COMMIT
+            Backend-->>Shop: 兑换成功，展示到账流水号
+        else 接口返回错误 (如商户余额不足)
+            LDC-->>Backend: 失败并返回错误信息
+            Backend->>DB: 自动退还用户扣减积分 (INSERT refund ledger)
+            Backend->>DB: UPDATE status='failed', error=...
+            Backend->>DB: COMMIT
+            Backend-->>Shop: 发货失败，积分已全额自动退还
+        else 网络超时 / 异常响应
+            Backend->>DB: UPDATE status='uncertain', error='待人工核对'
+            Backend->>DB: COMMIT (积分暂扣以防资金损失)
+            Backend-->>Shop: 请求已提交，结果待管理员人工对账
+        end
+    else 模拟测试模式 (未配置商户密钥)
+        Backend->>DB: UPDATE status='simulated', trade_no='SIM-...'
+        Backend->>DB: COMMIT
+        Backend-->>Shop: 模拟发货成功
+    end
+    deactivate Backend
+```
+
+---
+
+## 4. 独立赞助页面 (`/donate`) 与防伪验签
+
+为保持站内经济体系的纯粹性，**赞助绝对独立，赞助不会增加任何站内积分**。
+
+1. **赞助发起**：
+   用户选择或输入赞助金额（如 10.00 LDC），后端生成带签名防伪的订单，通过表单将用户重定向至官方支付网关 `https://credit.linux.do/epay/pay/submit.php`。
+2. **异步回调防伪核验 (`/payments/ldc/notify`)**：
+   - 官方服务器在用户支付成功后向本站发送 GET 异步通知。
+   - 后端对除 `sign`、`sign_type` 外的所有非空参数按 ASCII 字典升序拼接并追加 `Client Secret`，执行 **MD5 验签**。
+   - 验签通过后，核实商户 PID、订单号及金额完全相符，在数据库写事务中将交易流水号记录到 `donation_settlements` 表中，返回 HTTP 200 `success`。
+3. **公开赞助榜**：
+   - 赞助榜只统计 `donation_settlements` 中已结算入账的赞助，按用户累计赞助的 LDC 总额降序展示前 50 名。
+   - 任何浏览器手动拼接 URL 参数（如 `?donation=...&paid=1`）均不会使订单上榜，严防客户端伪造假赞助。
