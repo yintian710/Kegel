@@ -303,7 +303,7 @@ function render() {
   for (const trigger of practice_triggers) {
     const row = document.createElement("tr");
     cell(row, `@${trigger.username} · ${trigger.user_id}`);
-    cell(row, `第 ${trigger.group_no} 组`);
+    cell(row, `第 ${trigger.group_no} 次`);
     cell(row, displayTime(trigger.created_at));
     const flowCell = cell(row, trigger.flow_id ? trigger.flow_id.slice(0, 10) + "…" : "—");
     flowCell.style.fontFamily = "monospace";
@@ -493,7 +493,6 @@ $("#creditForm").addEventListener("submit", async (event) => {
 $("#settingsForm").addEventListener("submit", (event) => {
   event.preventDefault();
   void saveSettings({
-    ...state.data.settings,
     deadline: $("#deadline").value,
     min_step_seconds: Number($("#minStepSeconds").value),
     condition_url: $("#conditionUrl").value.trim(),

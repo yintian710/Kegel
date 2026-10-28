@@ -109,21 +109,86 @@ class CheckinBehavior(unittest.TestCase):
         finally:
             connection.close()
 
-    def test_configured_oauth_gates_pages_and_blocks_anonymous_practice(self):
+    def auto_round(self, user, repetitions, interval=2):
+        code, result = self.request("/api/session/start", {
+            "mode": "auto", "repetitions": repetitions, "interval_seconds": interval,
+        }, user=user)
+        self.assertEqual(code, 200, result)
+        session = result["session"]
+        for _ in range(repetitions - 1):
+            app.time.time.return_value += interval
+            code, result = self.request("/api/session/step", {"token": session["token"]}, user=user)
+            self.assertEqual(code, 200, result)
+            session = result["session"]
+        app.time.time.return_value += interval
+        code, result = self.request("/api/session/complete", {"token": session["token"]}, user=user)
+        self.assertEqual(code, 200, result)
+        self.assertTrue(result["session"]["completed"])
+        return result
+
+    def test_auto_round_counts_repeat_without_duplicate_daily_rewards(self):
+        self.open()
+        first = self.auto_round(1, 20)
+        self.assertIsNotNone(first["entry"])
+        self.auto_round(1, 1, 5)
+        self.assertEqual(self.request("/api/claim", {}, user=1)[0], 200)
+        self.auto_round(2, 3)
+        state = self.request("/api/status", user=1)[1]
+        self.assertEqual([(row["username"], row["count"]) for row in state["practice_leaderboard"]],
+                         [("user1", 21), ("user2", 3)])
+        self.assertEqual(state["total"], 2)
+        self.assertEqual(state["entry"]["rank"], 1)
+        self.assertEqual(state["wallet"]["balance"], 1000)
+        self.assertIsNone(state["review"])
+        self.assertEqual(self.request("/api/claim", {}, user=1)[1]["wallet"]["balance"], 1000)
+
+    def test_auto_round_cannot_complete_early_or_accept_invalid_settings(self):
+        for repetitions, interval in [(0, 2), (21, 2), (True, 2), (2, 1), (2, 6), (2, 2.5)]:
+            self.assertEqual(self.request("/api/session/start", {
+                "mode": "auto", "repetitions": repetitions, "interval_seconds": interval,
+            }, user=1)[0], 400)
+        _, result = self.request("/api/session/start", {
+            "mode": "auto", "repetitions": 1, "interval_seconds": 2,
+        }, user=1)
+        token = result["session"]["token"]
+        self.assertEqual(self.request("/api/session/complete", {"token": token}, user=1)[0], 429)
+        self.assertEqual(self.request("/api/status", user=1)[1]["practice_leaderboard"], [])
+        app.time.time.return_value += 2
+        code, result = self.request("/api/session/complete", {"token": token}, user=1)
+        self.assertEqual(code, 200, result)
+        self.assertIsNone(result["entry"])
+        self.assertEqual(self.request("/api/status", user=1)[1]["practice_leaderboard"][0]["count"], 1)
+        self.request("/api/session/complete", {"token": result["session"]["token"]}, user=1)
+        self.assertEqual(self.request("/api/status", user=1)[1]["practice_leaderboard"][0]["count"], 1)
+
+    def test_manual_practice_can_repeat_without_replacing_daily_reward(self):
+        self.open()
+        first = self.complete(1)
+        second = self.complete(1)
+        self.assertEqual(second["flow_id"], first["flow_id"])
+        state = self.request("/api/status", user=1)[1]
+        self.assertEqual(state["practice_leaderboard"][0]["count"], 6)
+        self.assertEqual(state["total"], 1)
+        self.assertEqual(self.request("/api/claim", {}, user=1)[1]["wallet"]["balance"], 1000)
+
+    def test_configured_oauth_allows_guest_practice_and_protects_account_pages(self):
         with patch.dict(os.environ, {"LINUXDO_CLIENT_ID": "client", "LINUXDO_CLIENT_SECRET": "secret"}):
-            for path, target in [("/", "/"), ("/index.html", "/"), ("/shop", "/shop"), ("/shop.html", "/shop"), ("/donate", "/donate"), ("/donate.html", "/donate"), ("/admin", "/admin"), ("/admin.html", "/admin")]:
+            for path, target in [("/shop", "/shop"), ("/shop.html", "/shop"), ("/donate", "/donate"), ("/donate.html", "/donate"), ("/admin", "/admin"), ("/admin.html", "/admin")]:
                 code, headers, _ = self.auth_response(path)
                 self.assertEqual(code, 302)
                 self.assertTrue(dict(headers)["Location"].startswith("https://connect.linux.do/oauth2/authorize?"))
                 state_cookie = next(value.split(";", 1)[0].split("=", 1)[1] for key, value in headers if key == "Set-Cookie")
                 self.assertEqual(app.verify_payload(state_cookie)["next"], target)
-            for path in ("/api/status", "/api/shop", "/api/donations"):
+            for path in ("/", "/index.html", "/practice", "/practice.html"):
+                self.assertEqual(self.auth_response(path)[0], 200)
+            self.assertEqual(self.request("/api/status")[0], 200)
+            for path in ("/api/shop", "/api/donations"):
                 self.assertEqual(self.request(path)[0], 401)
-            for path in ("/api/visit", "/api/session/start", "/api/session/step", "/api/session/complete"):
-                self.assertEqual(self.request(path, {})[0], 401)
-            with app.db() as connection:
-                self.assertEqual(connection.execute("SELECT COUNT(*) FROM sessions").fetchone()[0], 0)
-                self.assertEqual(connection.execute("SELECT COUNT(*) FROM practice_triggers").fetchone()[0], 0)
+            self.assertEqual(self.request("/api/visit", {})[0], 200)
+            code, result = self.request("/api/session/start", {})
+            self.assertEqual(code, 200)
+            self.assertFalse(result["session"]["eligible"])
+            self.assertEqual(self.request("/api/claim", {})[0], 401)
             self.assertEqual(self.auth_response("/api/icon?size=32")[0], 200)
             self.assertEqual(self.request("/api/status", user=1)[0], 200)
         self.assertEqual(self.auth_response("/")[0], 200)
@@ -148,7 +213,7 @@ class CheckinBehavior(unittest.TestCase):
             app.time.time.return_value = self.now + 6 * 86400
             self.assertEqual(self.auth_response("/", renewed_cookie)[0], 200)
             code, headers, _ = self.auth_response("/", session_cookie)
-            self.assertEqual(code, 302)
+            self.assertEqual(code, 200)
             self.assertFalse(any(key == "Set-Cookie" and value.startswith("linuxdo_session=") for key, value in headers))
             code, headers, _ = self.auth_response("/auth/logout", renewed_cookie)
             session_headers = [value for key, value in headers if key == "Set-Cookie" and value.startswith("linuxdo_session=")]

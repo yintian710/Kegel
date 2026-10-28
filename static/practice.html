@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <script src="/preferences.js"></script>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#f8fafc" />
+    <meta name="description" content="提肛练习，自主配置次数、间隔和浏览器提醒，无需登录即可使用。" />
+    <title>提肛练习</title>
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/styles.css" />
+    <script src="/app.js" defer></script>
+  </head>
+  <body class="stage-wrap practice-page" data-page="practice" data-step="0">
+    <header id="topbar" class="site-header">
+      <a class="site-brand" href="/" data-interactive>
+        <img class="brand-logo" src="/img/icon-48.png" alt="提肛打卡 Logo" />
+        <span>提肛打卡</span><span class="brand-badge">DAILY</span>
+      </a>
+      <nav class="site-nav">
+        <a class="nav-link" href="/" data-interactive>首页</a>
+        <a class="nav-link active" href="/practice" data-interactive>提肛练习</a>
+        <a id="walletLink" class="nav-link" href="/shop" data-interactive>商店</a>
+        <button id="accountButton" class="user-btn" type="button" data-interactive>LINUX DO 登录</button>
+      </nav>
+    </header>
+    <main class="practice-layout">
+      <section id="stage" class="stage-main" tabindex="0" role="button" aria-label="开始第 1 次练习">
+        <div id="stageContent" class="stage-content">
+          <div id="promptWrap">
+            <h1 id="prompt" class="landing-prompt" aria-live="polite" aria-atomic="true">开始第 1 次？</h1>
+            <p id="stageHint" class="landing-sub"><span id="stageHintText">先设置练习方式，点击这里开始</span><span id="stageCountdown"></span></p>
+            <button id="autoStopButton" class="btn-secondary auto-stop-button" type="button" data-interactive hidden>停止自主练习</button>
+            <div id="progress" class="dots-progress" aria-label="练习进度" hidden></div>
+          </div>
+          <section id="result" class="completion-container" data-interactive hidden>
+            <div class="completion-card">
+              <div class="completion-info">
+                <h2 id="completionTitle" class="completion-title"><span id="completionTitlePrefix"></span><span id="rankNumber" class="rank-num"></span><span id="completionTitleSuffix"></span></h2>
+                <p id="rewardLabel" class="completion-reward-text"><span id="rewardLabelPrefix"></span><b id="rewardAmount"></b><span id="rewardLabelSuffix"></span></p>
+                <div class="completion-actions">
+                  <button id="claimButton" class="btn-primary" type="button" hidden>领取站内积分</button>
+                  <button id="restartButton" class="btn-secondary" type="button">再练一轮</button>
+                  <a class="btn-secondary" href="/">返回首页</a>
+                  <span id="statusPill" class="status-pill" hidden></span>
+                </div>
+                <p id="rewardNote" class="status-copy" aria-live="polite"></p>
+              </div>
+            </div>
+          </section>
+        </div>
+      </section>
+      <aside id="practiceSettings" aria-label="练习与提醒设置"></aside>
+    </main>
+    <footer id="footer" class="practice-footer"><span id="openingNote"></span></footer>
+    <div id="notice" class="toast-notice" role="status" aria-live="polite" hidden></div>
+  </body>
+</html>

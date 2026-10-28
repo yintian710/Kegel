@@ -152,8 +152,9 @@ erDiagram
 5. **`donation_orders` & `donation_settlements`（赞助订单与核验结算表）**
    - 严格分离未支付的赞助意向与已通过 MD5 验签核验的到账记录。
    - 赞助榜仅从 `donation_settlements` 聚合，杜绝未付款上榜。
-6. **`practice_triggers`（每组练习打点审计表）**
-   - 记录客户端每次点击触发行为的真实服务器到达时间与组次编号，为领奖防作弊提供强审计凭证。
+6. **`practice_triggers`（每次练习打点审计表）**
+   - 记录每次手动或自主训练到达服务器的时间、次数编号、模式和本轮目标次数，为完成和领奖提供校验依据。
+   - `sessions` 保存模式、目标次数和间隔；`practice_completions` 以 `flow_id` 唯一记录已完成轮次，按用户和日期累计练习次数，不与每日奖励榜混用。
 
 7. **每日兑换配置**
    - 环境变量 `DAILY_LDC_LIMIT` 保存整数 LDC，默认 `800`；`0` 停止兑换但不影响签到积分。修改配置后需重启服务生效，不通过数据库或管理 API 设置。
@@ -185,7 +186,7 @@ with db() as connection:
 Cookie: linuxdo_session = <Base64Url(Payload)> . <Base64Url(HMAC-SHA256(Payload, APP_SECRET))>
 ```
 - **时序攻击免疫**：验签函数一律采用 `hmac.compare_digest` 恒定时间比对，抵御通过比对耗时推算签名的侧信道攻击。
-- **登录门槛与续期**：配置完整 OAuth 凭据后，业务页面在返回 HTML 前检查登录，未登录直接进入授权流程；用户数据和练习接口在处理前验证身份。登录 Cookie 与签名有效期统一为 5 天，有效身份访问页面或业务接口时自动续期；过期凭证不可续期，退出仅清除 Cookie。
+- **登录门槛与续期**：首页、公开状态和练习接口允许访客访问；配置 OAuth 后，商店、赞助和管理页面仍要求登录。访客不能正式打卡、领取奖励或进入次数榜。登录 Cookie 有效期为 5 天，有效身份访问时自动续期；过期凭证不可续期，退出清除 Cookie。
 - **全方位 Cookie 属性**：
   - `HttpOnly`：禁止一切前端 JS 读取，阻断 XSS 窃取 Cookie。
   - `SameSite=Lax`：禁止第三方站点跨域携带，防护 CSRF 跨站攻击。

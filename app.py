@@ -184,6 +184,9 @@ def init_db() -> None:
                 day TEXT NOT NULL, user_id TEXT NOT NULL, token TEXT NOT NULL,
                 step INTEGER NOT NULL DEFAULT 0, updated_at REAL NOT NULL,
                 expires_at REAL NOT NULL, min_seconds INTEGER NOT NULL,
+                flow_id TEXT NOT NULL DEFAULT '', eligible INTEGER NOT NULL DEFAULT 0,
+                mode TEXT NOT NULL DEFAULT 'manual', repetitions INTEGER NOT NULL DEFAULT 3,
+                interval_seconds INTEGER,
                 PRIMARY KEY(day, user_id)
             );
             CREATE TABLE IF NOT EXISTS entries (
@@ -191,6 +194,7 @@ def init_db() -> None:
                 rank INTEGER NOT NULL, amount INTEGER NOT NULL CHECK(amount >= 0),
                 completed_at REAL NOT NULL, claimed_at REAL,
                 reward_status TEXT NOT NULL CHECK(reward_status IN ('unclaimed','credited','none')),
+                flow_id TEXT,
                 PRIMARY KEY(day,user_id), UNIQUE(day,rank)
             );
         """)
@@ -395,6 +399,18 @@ def status_view(connection, user: dict | None, now: float, subject: str = "") ->
     review = connection.execute("SELECT reason,approved FROM reviews WHERE day=? AND user_id=? AND approved=0", (day["day"], identity)).fetchone()
     if session and not session["eligible"] and user and day["opened_at"] is not None and not review:
         session = None
+    practice_leaderboard = [dict(row) for row in connection.execute("""
+        WITH totals AS (
+            SELECT p.user_id,MAX(p.username) AS username,SUM(p.repetitions) AS count,
+                   MIN(p.completed_at) AS first_completed
+            FROM practice_completions p
+            LEFT JOIN reviews r ON r.day=p.day AND r.user_id=p.user_id
+            WHERE p.day=? AND (r.user_id IS NULL OR r.approved=1)
+            GROUP BY p.user_id
+        )
+        SELECT ROW_NUMBER() OVER (ORDER BY count DESC,first_completed,user_id) AS rank,username,count
+        FROM totals ORDER BY rank LIMIT 50
+    """, (day["day"],))]
     return {"ok": True, "user": user, "day": day["day"], "is_open": day["opened_at"] is not None,
             "opened_at": iso_time(day["opened_at"]), "open_reason": day["open_reason"],
             "deadline": config["deadline"], "timezone": "Asia/Shanghai", "min_step_seconds": config["min_step_seconds"],
@@ -403,7 +419,8 @@ def status_view(connection, user: dict | None, now: float, subject: str = "") ->
             "oauth_ready": bool(os.environ.get("LINUXDO_CLIENT_ID") and os.environ.get("LINUXDO_CLIENT_SECRET")),
             "total": connection.execute("SELECT COUNT(*) FROM entries WHERE day=?", (day["day"],)).fetchone()[0],
             "entry": entry_view(entry), "session": session_view(session, now), "review": dict(review) if review else None,
-            "leaderboard": [dict(row) for row in connection.execute("SELECT rank,username,amount,reward_status FROM entries WHERE day=? ORDER BY rank LIMIT 50", (day["day"],))]}
+            "leaderboard": [dict(row) for row in connection.execute("SELECT rank,username,amount,reward_status FROM entries WHERE day=? ORDER BY rank LIMIT 50", (day["day"],))],
+            "practice_leaderboard": practice_leaderboard}
 
 def admin_users(connection, query: str) -> list[dict]:
     if not isinstance(query, str) or not 1 <= len(query.strip()) <= 128:
@@ -595,13 +612,13 @@ class AppHandler(SimpleHTTPRequestHandler):
         parsed = urllib.parse.urlsplit(self.path)
         try:
             if os.environ.get("LINUXDO_CLIENT_ID") and os.environ.get("LINUXDO_CLIENT_SECRET"):
-                pages = {"/": "/", "/index.html": "/", "/shop": "/shop", "/shop.html": "/shop",
-                         "/donate": "/donate", "/donate.html": "/donate", "/admin": "/admin", "/admin.html": "/admin"}
+                pages = {"/shop": "/shop", "/shop.html": "/shop", "/donate": "/donate",
+                         "/donate.html": "/donate", "/admin": "/admin", "/admin.html": "/admin"}
                 if parsed.path in pages and not self.current_user():
                     self.path = "/auth/linuxdo/start?" + urllib.parse.urlencode({"next": pages[parsed.path]})
                     self.start_oauth()
                     return
-                if parsed.path in {"/api/status", "/api/shop", "/api/donations"}:
+                if parsed.path in {"/api/shop", "/api/donations"}:
                     self.require_user()
             if parsed.path == "/api/icon":
                 query = urllib.parse.parse_qs(parsed.query, keep_blank_values=True)
@@ -700,8 +717,8 @@ class AppHandler(SimpleHTTPRequestHandler):
                 self.send_header("Set-Cookie", self.cookie("linuxdo_session", "", 0))
                 self.send_header("Location", "/")
                 self.end_headers()
-            elif parsed.path in {"/", "/admin", "/shop", "/donate", "/index.html", "/admin.html", "/shop.html", "/donate.html", "/app.js", "/admin.js", "/shop.js", "/donate.js", "/styles.css", "/favicon.svg", "/favicon.ico"} or re.fullmatch(r"/img/[A-Za-z0-9_-]+\.(?:png|svg|webp)", parsed.path):
-                self.path = {"/": "/index.html", "/admin": "/admin.html", "/shop": "/shop.html", "/donate": "/donate.html", "/favicon.ico": "/img/icon-32.png"}.get(parsed.path, parsed.path)
+            elif parsed.path in {"/", "/practice", "/admin", "/shop", "/donate", "/index.html", "/practice.html", "/admin.html", "/shop.html", "/donate.html", "/app.js", "/preferences.js", "/admin.js", "/shop.js", "/donate.js", "/styles.css", "/favicon.svg", "/favicon.ico"} or re.fullmatch(r"/img/[A-Za-z0-9_-]+\.(?:png|svg|webp)", parsed.path):
+                self.path = {"/": "/index.html", "/practice": "/practice.html", "/admin": "/admin.html", "/shop": "/shop.html", "/donate": "/donate.html", "/favicon.ico": "/img/icon-32.png"}.get(parsed.path, parsed.path)
                 super().do_GET()
             else:
                 raise APIError("页面或接口不存在", 404)
@@ -727,9 +744,6 @@ class AppHandler(SimpleHTTPRequestHandler):
             body = json.loads(raw_body or b"{}")
             if not isinstance(body, dict):
                 raise APIError("请求体需为 JSON 对象")
-            if os.environ.get("LINUXDO_CLIENT_ID") and os.environ.get("LINUXDO_CLIENT_SECRET"):
-                if urllib.parse.urlsplit(self.path).path in {"/api/visit", "/api/session/start", "/api/session/step", "/api/session/complete"}:
-                    self.require_user()
             self.post_route(urllib.parse.urlsplit(self.path).path, body)
         except (APIError, practice.PracticeError) as exc:
             self.json_response({"ok": False, "error": str(exc)}, exc.status)
@@ -771,7 +785,7 @@ class AppHandler(SimpleHTTPRequestHandler):
             self.require_admin()
             self.admin_action(path, body)
         elif path == "/api/session/start":
-            self.start_session()
+            self.start_session(body)
         elif path == "/api/session/step":
             self.advance_session(body)
         elif path == "/api/session/complete":
@@ -802,27 +816,45 @@ class AppHandler(SimpleHTTPRequestHandler):
         else:
             raise APIError("接口不存在", 404)
 
-    def record_practice_attempt(self):
+    def record_practice_attempt(self, skip_auto_step: bool = False):
         user = self.current_user()
+        identity = user or {"id": f"anon:{self.visitor_id()}"}
         with db() as connection:
+            if skip_auto_step:
+                row = connection.execute(
+                    "SELECT mode FROM sessions WHERE day=? AND user_id=?", (day_key(), identity["id"])
+                ).fetchone()
+                if row and row["mode"] == "auto":
+                    return
             self.record(connection, user, "trigger", time.time())
 
-    def start_session(self):
+    def start_session(self, body):
         self.record_practice_attempt()
+        mode = body.get("mode", "manual")
+        repetitions = body.get("repetitions", 3) if mode == "manual" else body.get("repetitions")
+        if mode not in {"manual", "auto"}:
+            raise APIError("练习模式仅支持 manual 或 auto")
+        if isinstance(repetitions, bool) or not isinstance(repetitions, int) or not 1 <= repetitions <= 20:
+            raise APIError("练习次数须为 1–20 的整数")
         user = self.current_user()
         identity = self.practice_identity()
         with db() as connection:
             connection.execute("BEGIN IMMEDIATE")
             now = time.time()
             day = ensure_day(connection, now)
+            config = settings(connection)
+            interval_seconds = body.get("interval_seconds") if mode == "auto" else config["min_step_seconds"]
+            if mode == "auto" and (isinstance(interval_seconds, bool) or not isinstance(interval_seconds, int)
+                                   or not 2 <= interval_seconds <= 5):
+                raise APIError("自动练习间隔须为 2–5 秒的整数")
             review = connection.execute("SELECT 1 FROM reviews WHERE day=? AND user_id=? AND approved=0", (day["day"], identity["id"])).fetchone()
             eligible = bool(user and day["opened_at"] is not None and not review)
-            row = practice.start(connection, identity, day["day"], eligible, settings(connection)["min_step_seconds"], now)
+            row = practice.start(connection, identity, day["day"], eligible, mode, repetitions, interval_seconds, now)
             result = session_view(row, now)
         self.json_response({"ok": True, "session": result})
 
     def advance_session(self, body):
-        self.record_practice_attempt()
+        self.record_practice_attempt(skip_auto_step=True)
         token = body.get("token")
         if not isinstance(token, str):
             raise APIError("缺少练习凭证")
@@ -846,15 +878,24 @@ class AppHandler(SimpleHTTPRequestHandler):
             today = day_key(now)
             row = practice.complete(connection, identity["id"], today, token, now)
             entry = None
-            if row["eligible"] and user:
-                check_review(connection, user["id"], today)
-                rank = connection.execute("SELECT COUNT(*)+1 FROM entries WHERE day=?", (today,)).fetchone()[0]
-                amount = next((tier["amount"] for tier in settings(connection)["reward_tiers"] if rank <= tier["through"]), 0)
-                connection.execute("""INSERT INTO entries(day,user_id,username,rank,amount,completed_at,reward_status,flow_id)
-                    VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(day,user_id) DO UPDATE SET
-                    flow_id=excluded.flow_id,completed_at=excluded.completed_at
-                    WHERE entries.reward_status='unclaimed' AND entries.flow_id IS NULL""",
-                    (today, user["id"], user["username"], rank, amount, now, "unclaimed" if amount > 0 else "none", row["flow_id"]))
+            if user:
+                completed_at = row["updated_at"]
+                connection.execute("""INSERT OR IGNORE INTO practice_completions(
+                        day,user_id,username,flow_id,repetitions,completed_at)
+                    VALUES (?,?,?,?,?,?)""",
+                    (today, user["id"], user["username"], row["flow_id"], row["repetitions"], completed_at))
+                review = connection.execute(
+                    "SELECT 1 FROM reviews WHERE day=? AND user_id=? AND approved=0", (today, user["id"])
+                ).fetchone()
+                if row["eligible"] and not review:
+                    rank = connection.execute("SELECT COUNT(*)+1 FROM entries WHERE day=?", (today,)).fetchone()[0]
+                    amount = next((tier["amount"] for tier in settings(connection)["reward_tiers"] if rank <= tier["through"]), 0)
+                    connection.execute("""INSERT INTO entries(day,user_id,username,rank,amount,completed_at,reward_status,flow_id)
+                        VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(day,user_id) DO UPDATE SET
+                        flow_id=excluded.flow_id,completed_at=excluded.completed_at
+                        WHERE entries.reward_status='unclaimed' AND entries.flow_id IS NULL""",
+                        (today, user["id"], user["username"], rank, amount, completed_at,
+                         "unclaimed" if amount > 0 else "none", row["flow_id"]))
                 entry = connection.execute("SELECT * FROM entries WHERE day=? AND user_id=?", (today, user["id"])).fetchone()
             result = {"ok": True, "session": session_view(row, now), "entry": entry_view(entry)}
         self.json_response(result)
@@ -868,7 +909,7 @@ class AppHandler(SimpleHTTPRequestHandler):
             check_review(connection, user["id"], today)
             row = connection.execute("SELECT * FROM entries WHERE day=? AND user_id=?", (today, user["id"])).fetchone()
             if not row:
-                raise APIError("请先完成三组打卡", 409)
+                raise APIError("请先完成打卡练习", 409)
             if row["reward_status"] == "unclaimed":
                 practice.verify(connection, row["flow_id"], user["id"], today, row["completed_at"])
                 credits.credit_checkin(connection, user, row["amount"], f"{today}:{user['id']}", now)
@@ -924,7 +965,7 @@ class AppHandler(SimpleHTTPRequestHandler):
             raise APIError("尚未配置 LINUX DO Connect", 503)
         query = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
         next_path = query.get("next", ["/"])[0]
-        if next_path not in {"/", "/shop", "/donate", "/admin"}:
+        if next_path not in {"/", "/practice", "/shop", "/donate", "/admin"}:
             next_path = "/"
         state = secrets.token_urlsafe(32)
         state_cookie = sign_payload({"purpose": "oauth", "state": state, "next": next_path, "exp": time.time() + 600})
@@ -957,7 +998,7 @@ class AppHandler(SimpleHTTPRequestHandler):
         self.send_response(303)
         self.send_header("Set-Cookie", self.cookie("linuxdo_session", session, LOGIN_SESSION_SECONDS))
         self.send_header("Set-Cookie", self.cookie("oauth_state", "", 0))
-        self.send_header("Location", saved.get("next") if saved.get("next") in {"/", "/shop", "/donate", "/admin"} else "/")
+        self.send_header("Location", saved.get("next") if saved.get("next") in {"/", "/practice", "/shop", "/donate", "/admin"} else "/")
         self.end_headers()
 
 
