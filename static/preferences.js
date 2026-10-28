@@ -4,9 +4,9 @@
   const STORAGE_KEY = "practice_preferences_v1";
   const REMINDER_KEY = "practice_reminder_last_v1";
   const DEFAULTS = Object.freeze({
-    mode: "manual",
-    repetitions: 3,
-    intervalSeconds: 2,
+    mode: "auto",
+    repetitions: 10,
+    intervalSeconds: 3,
     hideTigang: false,
     exerciseName: "",
     notifyHour: false,
@@ -42,7 +42,7 @@
 
   function normalize(candidate) {
     return {
-      mode: candidate?.mode === "auto" ? "auto" : "manual",
+      mode: candidate?.mode === "auto" ? "auto" : candidate?.mode === "manual" ? "manual" : DEFAULTS.mode,
       repetitions: integerInRange(candidate?.repetitions, 1, 20, DEFAULTS.repetitions),
       intervalSeconds: integerInRange(candidate?.intervalSeconds, 2, 5, DEFAULTS.intervalSeconds),
       hideTigang: candidate?.hideTigang === true,
@@ -224,29 +224,35 @@
       </div>`;
     document.body.append(panel);
     if (mount) {
-      const options = document.createElement("section");
-      options.className = "preferences-panel";
+      const options = document.createElement("details");
+      options.className = "preferences-panel practice-settings-panel";
+      options.open = true;
       options.innerHTML = `
-        <h2>练习设置</h2>
-        <p class="preference-note">无需登录即可配置练习；登录后完成的练习才计入排行榜。</p>
-        <fieldset id="preferenceMode" class="preference-mode">
-          <legend>练习方式</legend>
-          <div class="preference-mode-options">
-            <label class="preference-check"><input id="preferenceModeManual" type="radio" name="practiceMode" value="manual" /> 手动</label>
-            <label class="preference-check"><input id="preferenceModeAuto" type="radio" name="practiceMode" value="auto" /> 自主</label>
+        <summary class="practice-settings-summary">
+          <span class="practice-settings-title">练习设置</span>
+          <span class="practice-settings-toggle" aria-hidden="true"></span>
+        </summary>
+        <div class="practice-settings-body">
+          <p class="preference-note">无需登录即可配置练习；登录后完成的练习才计入排行榜。</p>
+          <fieldset id="preferenceMode" class="preference-mode">
+            <legend>练习方式</legend>
+            <div class="preference-mode-options">
+              <label class="preference-check"><input id="preferenceModeManual" type="radio" name="practiceMode" value="manual" /> 手动</label>
+              <label class="preference-check"><input id="preferenceModeAuto" type="radio" name="practiceMode" value="auto" /> 自动</label>
+            </div>
+          </fieldset>
+          <div class="preference-row">
+            <label class="preference-field">练习次数（1–20 次）
+              <input id="preferenceRepetitions" class="input-text" type="number" inputmode="numeric" min="1" max="20" step="1" aria-describedby="preferenceRepetitionsError" />
+              <span id="preferenceRepetitionsError" class="preference-error" role="alert" hidden></span>
+            </label>
+            <label class="preference-field">间隔秒数（2–5 秒）
+              <input id="preferenceInterval" class="input-text" type="number" inputmode="numeric" min="2" max="5" step="1" aria-describedby="preferenceIntervalError" />
+              <span id="preferenceIntervalError" class="preference-error" role="alert" hidden></span>
+            </label>
           </div>
-        </fieldset>
-        <div class="preference-row">
-          <label class="preference-field">练习次数（1–20 次）
-            <input id="preferenceRepetitions" class="input-text" type="number" inputmode="numeric" min="1" max="20" step="1" aria-describedby="preferenceRepetitionsError" />
-            <span id="preferenceRepetitionsError" class="preference-error" role="alert" hidden></span>
-          </label>
-          <label class="preference-field">间隔秒数（2–5 秒）
-            <input id="preferenceInterval" class="input-text" type="number" inputmode="numeric" min="2" max="5" step="1" aria-describedby="preferenceIntervalError" />
-            <span id="preferenceIntervalError" class="preference-error" role="alert" hidden></span>
-          </label>
-        </div>
-        <p id="preferenceModeNote" class="preference-note"></p>`;
+          <p id="preferenceModeNote" class="preference-note"></p>
+        </div>`;
       mount.append(options);
     }
 
@@ -295,7 +301,7 @@
       repetitions.disabled = false;
       interval.disabled = preferences.mode !== "auto";
       document.getElementById("preferenceModeNote").textContent = preferences.mode === "auto"
-        ? "自主模式会按所选次数和间隔连续进行，无需点击下一次。"
+        ? "自动模式会按所选次数和间隔连续进行，无需点击下一次。"
         : "手动模式按所选次数练习，每次沿用站点设定的原间隔。";
     }
     document.getElementById("preferenceHide").checked = preferences.hideTigang;

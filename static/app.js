@@ -2,6 +2,7 @@
 
 const $ = (selector) => document.querySelector(selector);
 const practicePage = document.body.dataset.page === "practice";
+if (practicePage) document.documentElement.classList.add("practice-page-root");
 
 const state = {
   started: false,
@@ -30,9 +31,9 @@ let autoPromptToken = null;
 
 function preferences() {
   const selected = window.PracticePreferences?.get() || {
-    mode: "manual",
-    repetitions: 3,
-    intervalSeconds: 2,
+    mode: "auto",
+    repetitions: 10,
+    intervalSeconds: 3,
   };
   return practicePage ? selected : { ...selected, mode: "manual", repetitions: 3 };
 }
@@ -169,12 +170,15 @@ function renderLeaderboard() {
   }
 
   const quota = state.status?.quota;
-  if (quota) {
-    $("#quotaUsedText").textContent = `今日已兑换 ${quota.used} / ${quota.limit} LDC`;
-    $("#quotaRemainingText").textContent = `剩余 ${quota.remaining} LDC`;
+  const quotaUsed = $("#quotaUsedText");
+  const quotaRemaining = $("#quotaRemainingText");
+  const quotaBar = $("#quotaBarFill");
+  if (quota && quotaUsed && quotaRemaining && quotaBar) {
+    quotaUsed.textContent = `今日已兑换 ${quota.used} / ${quota.limit} LDC`;
+    quotaRemaining.textContent = `剩余 ${quota.remaining} LDC`;
     const limit = Number(quota.limit);
     const percentage = limit > 0 ? Math.min(100, Math.round((Number(quota.used) / limit) * 100)) : 0;
-    $("#quotaBarFill").style.width = `${percentage}%`;
+    quotaBar.style.width = `${percentage}%`;
   }
 
   if (!records.length) {
@@ -222,7 +226,7 @@ function renderPracticeLeaderboard() {
     cell.colSpan = 3;
     cell.style.textAlign = "center";
     cell.style.color = "var(--text-dim)";
-    cell.textContent = "完成一次自主练习后会显示在这里。";
+    cell.textContent = "完成一次自动练习后会显示在这里。";
     row.append(cell);
     list.append(row);
     return;
@@ -379,7 +383,7 @@ function renderResult() {
         : status?.user
           ? `共完成 ${repetitionCount()} 次；审核通过前不计入次数榜。`
           : `共完成 ${repetitionCount()} 次访客练习，不计入次数榜。`;
-      setCompletionSummary("本轮自主练习完成", resultCopy);
+      setCompletionSummary("本轮自动练习完成", resultCopy);
       pill.hidden = false;
       pill.className = "status-pill credited";
       pill.textContent = counted ? "练习已记录" : "本地练习完成";
@@ -431,7 +435,7 @@ function exercisePrompt() {
   if (!state.session) {
     if (!state.started) return "你今天提肛了吗？";
     if (practicePage && state.status?.session && !sessionCompleted(state.status.session)) return "继续本轮练习";
-    return preferences().mode === "auto" ? "开始自主练习" : "开始第 1 次？";
+    return preferences().mode === "auto" ? "开始自动练习" : "开始第 1 次？";
   }
   const current = Math.min(state.step + 1, repetitionCount());
   return isAutoSession() ? `第 ${current} 次` : `开始第 ${Math.min(current + 1, repetitionCount())} 次？`;
@@ -451,8 +455,8 @@ function renderHint() {
   let hintText;
 
   if (state.busy) hintText = "正在记录，请稍候…";
-  else if (state.autoPaused) hintText = "自主练习已停止，可用下方按钮继续";
-  else if (!state.session) hintText = preferences().mode === "auto" ? "点击页面或按任意键，开始自主练习" : "点击页面或按任意键，开始第 1 次";
+  else if (state.autoPaused) hintText = "自动练习已停止，可用下方按钮继续";
+  else if (!state.session) hintText = preferences().mode === "auto" ? "点击页面或按任意键，开始自动练习" : "点击页面或按任意键，开始第 1 次";
   else if (remaining > 0) hintText = "轻轻收紧，缓慢放松 · 本次还剩 ";
   else if (isAutoSession() && state.step < repetitionCount() - 1) hintText = "正在自动进入下一次…";
   else if (state.step < repetitionCount() - 1) hintText = `点击页面或按任意键，开始第 ${state.step + 2} 次`;
@@ -503,10 +507,11 @@ function render() {
   const stopButton = $("#autoStopButton");
   if (stopButton) {
     stopButton.hidden = !(isAutoSession() && !sessionCompleted());
-    stopButton.textContent = state.autoPaused ? "继续自主练习" : "停止自主练习";
+    stopButton.textContent = state.autoPaused ? "继续自动练习" : "停止自动练习";
   }
   renderHint();
   renderResult();
+  if (practicePage) renderPracticeLeaderboard();
 }
 
 async function pollStatus() {

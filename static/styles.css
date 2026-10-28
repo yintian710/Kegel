@@ -1074,8 +1074,27 @@ button:disabled {
   line-height: 1.5;
 }
 
+html.practice-page-root,
+html.practice-page-root body {
+  overflow-x: clip;
+}
 .practice-page .site-header {
   width: 100%;
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  background: rgba(248, 250, 252, 0.92);
+  backdrop-filter: blur(10px);
+}
+.practice-home-link {
+  align-self: flex-start;
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 600;
+  padding: 4px 2px;
+}
+.practice-home-link:hover {
+  color: var(--primary);
 }
 .practice-layout {
   display: grid;
@@ -1087,6 +1106,62 @@ button:disabled {
   padding: 24px;
   flex: 1;
   align-items: start;
+}
+.practice-main-column {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  min-width: 0;
+}
+.practice-ranking {
+  padding: 24px;
+}
+.practice-ranking-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+.practice-ranking-total {
+  color: var(--text-dim);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.practice-settings-panel {
+  padding: 0;
+  overflow: hidden;
+}
+.practice-settings-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 20px 22px;
+  cursor: pointer;
+  list-style: none;
+}
+.practice-settings-summary::-webkit-details-marker {
+  display: none;
+}
+.practice-settings-title {
+  color: var(--text-main);
+  font-size: 18px;
+  font-weight: 700;
+}
+.practice-settings-toggle {
+  color: var(--text-dim);
+  font-size: 12px;
+  font-weight: 600;
+}
+.practice-settings-toggle::before {
+  content: "收起";
+}
+.practice-settings-panel:not([open]) .practice-settings-toggle::before {
+  content: "展开";
+}
+.practice-settings-body {
+  padding: 0 22px 22px;
 }
 .practice-layout .stage-main {
   min-height: 540px;

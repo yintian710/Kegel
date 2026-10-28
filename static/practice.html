@@ -5,7 +5,7 @@
     <script src="/preferences.js"></script>
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="theme-color" content="#f8fafc" />
-    <meta name="description" content="提肛练习，自主配置次数、间隔和浏览器提醒，无需登录即可使用。" />
+    <meta name="description" content="提肛练习，可配置次数、间隔和浏览器提醒，无需登录即可使用。" />
     <title>提肛练习</title>
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <link rel="stylesheet" href="/styles.css" />
@@ -25,12 +25,14 @@
       </nav>
     </header>
     <main class="practice-layout">
+      <div class="practice-main-column">
+      <a class="practice-home-link" href="/" data-interactive>← 返回首页</a>
       <section id="stage" class="stage-main" tabindex="0" role="button" aria-label="开始第 1 次练习">
         <div id="stageContent" class="stage-content">
           <div id="promptWrap">
             <h1 id="prompt" class="landing-prompt" aria-live="polite" aria-atomic="true">开始第 1 次？</h1>
             <p id="stageHint" class="landing-sub"><span id="stageHintText">先设置练习方式，点击这里开始</span><span id="stageCountdown"></span></p>
-            <button id="autoStopButton" class="btn-secondary auto-stop-button" type="button" data-interactive hidden>停止自主练习</button>
+            <button id="autoStopButton" class="btn-secondary auto-stop-button" type="button" data-interactive hidden>停止自动练习</button>
             <div id="progress" class="dots-progress" aria-label="练习进度" hidden></div>
           </div>
           <section id="result" class="completion-container" data-interactive hidden>
@@ -50,6 +52,24 @@
           </section>
         </div>
       </section>
+      <section class="card practice-ranking" data-interactive aria-labelledby="practiceRankingTitle">
+        <div class="practice-ranking-header">
+          <div>
+            <h3 id="practiceRankingTitle" class="card-title">每日排名</h3>
+            <p class="card-subtitle" style="margin: 4px 0 0;">按今日完成的练习次数排序</p>
+          </div>
+          <span id="practiceLeaderboardTotal" class="practice-ranking-total"></span>
+        </div>
+        <div class="table-wrap" style="max-height: 320px;">
+          <table class="rank-table">
+            <thead>
+              <tr><th>名次</th><th>用户名</th><th>完成次数</th></tr>
+            </thead>
+            <tbody id="practiceLeaderboardList"></tbody>
+          </table>
+        </div>
+      </section>
+      </div>
       <aside id="practiceSettings" aria-label="练习与提醒设置"></aside>
     </main>
     <footer id="footer" class="practice-footer"><span id="openingNote"></span></footer>
