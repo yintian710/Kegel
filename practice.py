@@ -91,7 +91,8 @@ def start(connection, user: dict, day: str, eligible: bool, mode: str, repetitio
     active = view(row, now)
     eligibility_upgrade = bool(row and eligible and not row["eligible"])
     repeat_completed = bool(row and row["step"] == row["repetitions"])
-    if active and not eligibility_upgrade and not repeat_completed:
+    same_settings = bool(row and row["mode"] == mode and row["repetitions"] == repetitions)
+    if active and same_settings and not eligibility_upgrade and not repeat_completed:
         return row
     connection.execute("""INSERT INTO sessions(
             day,user_id,token,updated_at,expires_at,min_seconds,flow_id,eligible,mode,repetitions,interval_seconds)

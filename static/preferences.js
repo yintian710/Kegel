@@ -233,7 +233,7 @@
           <span class="practice-settings-toggle" aria-hidden="true"></span>
         </summary>
         <div class="practice-settings-body">
-          <p class="preference-note">无需登录即可配置练习；登录后完成的练习才计入排行榜。</p>
+          <p class="preference-note">训练在当前浏览器本地运行和保存，无需登录，不影响每日打卡。</p>
           <fieldset id="preferenceMode" class="preference-mode">
             <legend>练习方式</legend>
             <div class="preference-mode-options">

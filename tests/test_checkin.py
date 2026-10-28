@@ -171,6 +171,18 @@ class CheckinBehavior(unittest.TestCase):
         self.assertEqual(state["total"], 1)
         self.assertEqual(self.request("/api/claim", {}, user=1)[1]["wallet"]["balance"], 1000)
 
+    def test_checkin_start_replaces_legacy_automatic_training_session(self):
+        self.open()
+        _, legacy = self.request("/api/session/start", {
+            "mode": "auto", "repetitions": 10, "interval_seconds": 3,
+        }, user=1)
+        _, result = self.request("/api/session/start", {"mode": "manual", "repetitions": 3}, user=1)
+        self.assertEqual(result["session"]["mode"], "manual")
+        self.assertEqual(result["session"]["repetitions"], 3)
+        self.assertNotEqual(result["session"]["token"], legacy["session"]["token"])
+        entry = self.complete(1)
+        self.assertEqual(entry["rank"], 1)
+
     def test_configured_oauth_allows_guest_practice_and_protects_account_pages(self):
         with patch.dict(os.environ, {"LINUXDO_CLIENT_ID": "client", "LINUXDO_CLIENT_SECRET": "secret"}):
             for path, target in [("/shop", "/shop"), ("/shop.html", "/shop"), ("/donate", "/donate"), ("/donate.html", "/donate"), ("/admin", "/admin"), ("/admin.html", "/admin")]:

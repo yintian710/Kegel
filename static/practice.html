@@ -26,7 +26,6 @@
     </header>
     <main class="practice-layout">
       <div class="practice-main-column">
-      <a class="practice-home-link" href="/" data-interactive>← 返回首页</a>
       <section id="stage" class="stage-main" tabindex="0" role="button" aria-label="开始第 1 次练习">
         <div id="stageContent" class="stage-content">
           <div id="promptWrap">
@@ -55,15 +54,15 @@
       <section class="card practice-ranking" data-interactive aria-labelledby="practiceRankingTitle">
         <div class="practice-ranking-header">
           <div>
-            <h3 id="practiceRankingTitle" class="card-title">每日排名</h3>
-            <p class="card-subtitle" style="margin: 4px 0 0;">按今日完成的练习次数排序</p>
+            <h3 id="practiceRankingTitle" class="card-title">今日训练记录</h3>
+            <p class="card-subtitle" style="margin: 4px 0 0;">仅记录当前浏览器完成的训练次数</p>
           </div>
           <span id="practiceLeaderboardTotal" class="practice-ranking-total"></span>
         </div>
         <div class="table-wrap" style="max-height: 320px;">
           <table class="rank-table">
             <thead>
-              <tr><th>名次</th><th>用户名</th><th>完成次数</th></tr>
+              <tr><th>序号</th><th>记录范围</th><th>完成次数</th></tr>
             </thead>
             <tbody id="practiceLeaderboardList"></tbody>
           </table>

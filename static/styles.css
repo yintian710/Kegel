@@ -1086,16 +1086,6 @@ html.practice-page-root body {
   background: rgba(248, 250, 252, 0.92);
   backdrop-filter: blur(10px);
 }
-.practice-home-link {
-  align-self: flex-start;
-  color: var(--text-muted);
-  font-size: 13px;
-  font-weight: 600;
-  padding: 4px 2px;
-}
-.practice-home-link:hover {
-  color: var(--primary);
-}
 .practice-layout {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 350px;

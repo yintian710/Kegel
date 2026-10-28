@@ -29,6 +29,99 @@ let viewTransitionRunning = false;
 let autoPromptAnimation = null;
 let autoPromptToken = null;
 
+const localPractice = practicePage ? (() => {
+  const storageName = "local_training_v1";
+  let saved;
+  try {
+    saved = JSON.parse(localStorage.getItem(storageName) || "{}");
+  } catch (_error) {
+    saved = {};
+  }
+  let record = saved && typeof saved === "object" ? saved : {};
+
+  function save() {
+    try {
+      localStorage.setItem(storageName, JSON.stringify(record));
+    } catch (_error) {
+      // Training remains available when browser storage is unavailable.
+    }
+  }
+
+  function today() {
+    return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Shanghai", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+  }
+
+  function view() {
+    if (record.day !== today()) record = { day: today(), count: 0, session: null };
+    const session = record.session;
+    if (!session || (!session.completed && session.expires_at <= Date.now())) return null;
+    return {
+      ...session,
+      eligible: false,
+      wait_seconds: session.completed ? 0 : Math.max(0, (session.ready_at - Date.now()) / 1000),
+      expires_in: session.completed ? null : Math.max(0, (session.expires_at - Date.now()) / 1000),
+    };
+  }
+
+  function status() {
+    const session = view();
+    return {
+      day: record.day, session,
+      practice_leaderboard: record.count > 0 ? [{ rank: 1, username: "当前浏览器", count: record.count }] : [],
+    };
+  }
+
+  function start(selected) {
+    const active = view();
+    if (active && !active.completed) return { session: active };
+    const seconds = selected.intervalSeconds;
+    record.session = {
+      token: crypto.randomUUID(), mode: selected.mode, repetitions: selected.repetitions,
+      interval_seconds: seconds, min_seconds: seconds, step: 0, completed: false,
+      ready_at: Date.now() + seconds * 1000, expires_at: Date.now() + 600000,
+    };
+    save();
+    return { session: view() };
+  }
+
+  function current(token) {
+    const session = view();
+    if (!session || session.token !== token) throw new Error("本轮训练已失效，请重新开始。");
+    if (session.wait_seconds > 0) throw new Error("请等待本次倒计时结束。");
+    return record.session;
+  }
+
+  function step(token) {
+    const session = current(token);
+    if (session.completed || session.step >= session.repetitions - 1) throw new Error("本轮次数已全部开始，请等待完成。");
+    session.step += 1;
+    session.token = crypto.randomUUID();
+    session.ready_at = Date.now() + session.interval_seconds * 1000;
+    session.expires_at = Date.now() + 600000;
+    save();
+    return { session: view() };
+  }
+
+  function complete(token) {
+    const session = current(token);
+    if (!session.completed) {
+      if (session.step !== session.repetitions - 1) throw new Error("请先完成本轮全部训练次数。");
+      session.completed = true;
+      session.step = session.repetitions;
+      record.count = (Number(record.count) || 0) + session.repetitions;
+      save();
+    }
+    return { session: view() };
+  }
+
+  function reset() {
+    record.session = null;
+    save();
+  }
+
+  return { status, start, step, complete, reset };
+})() : null;
+
 function preferences() {
   const selected = window.PracticePreferences?.get() || {
     mode: "auto",
@@ -55,10 +148,6 @@ function isAutoSession() {
   return state.session?.mode === "auto";
 }
 
-function sessionMatchesPage(session) {
-  return practicePage || (session.mode === "manual" && session.repetitions === 3);
-}
-
 async function api(path, body) {
   const response = await fetch(path, {
     method: body === undefined ? "GET" : "POST",
@@ -80,6 +169,7 @@ function notify(message) {
 }
 
 function resetPractice(message) {
+  if (practicePage) localPractice.reset();
   state.session = null;
   state.completionKind = null;
   state.step = 0;
@@ -104,15 +194,33 @@ function applySession(session) {
   if (!sameSession) state.autoPaused = false;
 }
 
+function showHomeCompletion() {
+  if (practicePage || state.started) return;
+  const completedSession = state.status?.session && sessionCompleted(state.status.session)
+    ? state.status.session : null;
+  if (!state.status?.entry && !completedSession) return;
+  state.started = true;
+  if (state.status.entry) {
+    state.entry = state.status.entry;
+    state.completionKind = "server";
+  } else {
+    applySession(completedSession);
+  }
+  state.showResult = true;
+  if (!state.poll) state.poll = setInterval(pollStatus, 20000);
+  render();
+}
+
 function applyStatus(status) {
   const previousDay = state.status?.day;
   state.status = status;
+  if (!practicePage && status.session && (status.session.mode !== "manual" || status.session.repetitions !== 3)) status.session = null;
   if (previousDay && previousDay !== status.day) {
     state.entry = null;
     resetPractice("新的一天开始了，点击页面开始今天的练习。");
   }
   if (status.entry) state.entry = status.entry;
-  if (state.started && status.session && !sessionCompleted(status.session) && sessionMatchesPage(status.session)) {
+  if (state.started && status.session && !sessionCompleted(status.session)) {
     applySession(status.session);
   } else if (state.started && state.session && !sessionCompleted()) {
     resetPractice("十分钟未进入下一次，本轮已失效，请从第一次重新开始。");
@@ -120,11 +228,12 @@ function applyStatus(status) {
   if (state.started) render();
 }
 
-const visit = api("/api/visit", {}).then((status) => {
+const visit = (practicePage ? Promise.resolve(localPractice.status()) : api("/api/visit", {})).then((status) => {
   applyStatus(status);
+  showHomeCompletion();
   if (practicePage) {
     state.started = true;
-    state.poll = setInterval(pollStatus, 20000);
+    if (status.session) applySession(status.session);
     render();
   }
   return status;
@@ -219,14 +328,14 @@ function renderPracticeLeaderboard() {
   if (!list) return;
   list.replaceChildren();
   const records = state.status?.practice_leaderboard || [];
-  $("#practiceLeaderboardTotal").textContent = records.length ? `今日已有 ${records.length} 人上榜` : "今日暂无记录";
+  $("#practiceLeaderboardTotal").textContent = practicePage ? "仅当前浏览器" : records.length ? `今日已有 ${records.length} 人上榜` : "今日暂无记录";
   if (!records.length) {
     const row = document.createElement("tr");
     const cell = document.createElement("td");
     cell.colSpan = 3;
     cell.style.textAlign = "center";
     cell.style.color = "var(--text-dim)";
-    cell.textContent = "完成一次自动练习后会显示在这里。";
+    cell.textContent = practicePage ? "完成一轮训练后，本地次数会显示在这里。" : "完成一次自动练习后会显示在这里。";
     row.append(cell);
     list.append(row);
     return;
@@ -238,7 +347,7 @@ function renderPracticeLeaderboard() {
     const rankCell = document.createElement("td");
     rankCell.textContent = record.rank;
     const userCell = document.createElement("td");
-    userCell.textContent = currentUsername && record.username === currentUsername ? `你 (@${record.username})` : `@${record.username}`;
+    userCell.textContent = practicePage ? record.username : currentUsername && record.username === currentUsername ? `你 (@${record.username})` : `@${record.username}`;
     const countCell = document.createElement("td");
     countCell.textContent = `${record.count} 次`;
     row.append(rankCell, userCell, countCell);
@@ -376,23 +485,12 @@ function renderResult() {
     note.textContent = "";
     if (restartButton) restartButton.disabled = state.busy;
 
-    if (isAutoSession()) {
-      const counted = Boolean(status?.user) && !(status?.review && !status.review.approved);
-      const resultCopy = counted
-        ? `共完成 ${repetitionCount()} 次，已计入今日练习次数。`
-        : status?.user
-          ? `共完成 ${repetitionCount()} 次；审核通过前不计入次数榜。`
-          : `共完成 ${repetitionCount()} 次访客练习，不计入次数榜。`;
-      setCompletionSummary("本轮自动练习完成", resultCopy);
+    if (practicePage) {
+      setCompletionSummary("本轮练习完成", `共完成 ${repetitionCount()} 次，已记录在当前浏览器。`);
       pill.hidden = false;
       pill.className = "status-pill credited";
-      pill.textContent = counted ? "练习已记录" : "本地练习完成";
-      note.textContent = "可以再练一轮；每日奖励榜仍按当天正式打卡结果计算。";
-      if (state.entry?.reward_status === "unclaimed") {
-        button.hidden = false;
-        button.disabled = state.busy;
-        button.textContent = state.busy ? "正在领取…" : "领取今日打卡积分";
-      }
+      pill.textContent = "本地练习已记录";
+      note.textContent = "可以再练一轮；本地训练不影响每日打卡和积分。";
     } else if (state.entry) {
       const entry = state.entry;
       setCompletionSummary("今日第 ", "本次奖励 ", entry.rank, entry.amount);
@@ -413,7 +511,7 @@ function renderResult() {
         note.textContent = "签到积分领取不受每日 LDC 兑换额度限制。";
       }
     } else if (state.completionKind === "closed") {
-      setCompletionSummary("今日练习完成", "打卡尚未开放，本次练习已计入次数，但不计奖励排名。");
+      setCompletionSummary("今日打卡操作完成", "打卡尚未开放，本次操作不计入正式排名。");
       note.textContent = `每日最晚 ${status?.deadline || "22:00"}（北京时间）开放，也可能提前开启。`;
     } else if (state.completionKind === "review") {
       setCompletionSummary("今日练习完成", "今日访问需要管理员确认，暂不计奖励排名。");
@@ -494,8 +592,11 @@ function render() {
   document.querySelectorAll("#progress span").forEach((dot, index) => dot.classList.toggle("active", index <= state.step));
 
   $("#accountButton").textContent = status?.user ? `@${status.user.username} · 退出` : "LINUX DO 登录";
+  $("#accountButton").hidden = practicePage;
   $("#walletLink").textContent = status?.wallet ? `商店 (${status.wallet.balance})` : "商店";
-  if (status) {
+  if (practicePage) {
+    $("#openingNote").textContent = "训练仅在当前浏览器运行和保存，无需登录，不影响每日打卡。";
+  } else if (status) {
     $("#openingNote").textContent = status.review && !status.review.approved
       ? "今日访问待管理员确认 · 可以先练习"
       : status.is_open
@@ -515,7 +616,7 @@ function render() {
 }
 
 async function pollStatus() {
-  if (!state.started || state.busy || state.polling || document.hidden) return;
+  if (practicePage || !state.started || state.busy || state.polling || document.hidden) return;
   state.polling = true;
   try {
     applyStatus(await api("/api/status"));
@@ -531,15 +632,16 @@ async function begin() {
     document.querySelector('#practiceSettings [aria-invalid="true"]')?.focus();
     throw new Error("请先修正练习设置中的提示。");
   }
-  if (!state.status) applyStatus(await api("/api/status"));
+  if (!state.status) applyStatus(practicePage ? localPractice.status() : await api("/api/status"));
+  if (practicePage) {
+    state.showResult = false;
+    applySession(localPractice.start(preferences()).session);
+    return;
+  }
   const selected = preferences();
   const body = { mode: selected.mode, repetitions: selected.repetitions };
   if (selected.mode === "auto") body.interval_seconds = selected.intervalSeconds;
   const response = await api("/api/session/start", body);
-  if (!sessionMatchesPage(response.session)) {
-    window.location.assign(`/practice${window.location.search}`);
-    return;
-  }
   state.showResult = false;
   applySession(response.session);
 }
@@ -548,10 +650,10 @@ async function completeSession() {
   if (state.busy || state.polling || !state.session || state.step !== repetitionCount() - 1 || Date.now() < state.readyAt) return;
   state.busy = true;
   try {
-    const response = await api("/api/session/complete", { token: state.session.token });
+    const response = practicePage ? localPractice.complete(state.session.token) : await api("/api/session/complete", { token: state.session.token });
     applySession(response.session);
     if (response.entry) state.entry = response.entry;
-    applyStatus(await api("/api/status"));
+    applyStatus(practicePage ? localPractice.status() : await api("/api/status"));
   } catch (error) {
     state.autoPaused = isAutoSession();
     notify(error.message);
@@ -565,7 +667,7 @@ async function stepSession() {
   if (state.busy || state.polling || !state.session || Date.now() < state.readyAt) return;
   state.busy = true;
   try {
-    const response = await api("/api/session/step", { token: state.session.token });
+    const response = practicePage ? localPractice.step(state.session.token) : await api("/api/session/step", { token: state.session.token });
     applySession(response.session);
   } catch (error) {
     state.autoPaused = isAutoSession();
@@ -590,10 +692,6 @@ async function advance() {
       state.poll = setInterval(pollStatus, 20000);
       await visit;
       if (state.status?.session && !sessionCompleted(state.status.session)) {
-        if (!sessionMatchesPage(state.status.session)) {
-          window.location.assign(`/practice${window.location.search}`);
-          return;
-        }
         applySession(state.status.session);
       }
       else if (state.entry && preferences().mode !== "auto") {
@@ -607,7 +705,7 @@ async function advance() {
       return;
     }
     if (Date.now() < state.readyAt) return;
-    const response = await api("/api/session/step", { token: state.session.token });
+    const response = practicePage ? localPractice.step(state.session.token) : await api("/api/session/step", { token: state.session.token });
     applySession(response.session);
   } catch (error) {
     notify(error.message);
