@@ -42,6 +42,7 @@
                 <div class="completion-actions">
                   <button id="claimButton" class="btn-primary" type="button" hidden>领取站内积分</button>
                   <button id="restartButton" class="btn-secondary" type="button">再练一轮</button>
+                  <button id="syncPracticeButton" class="btn-primary" type="button" hidden>上传训练记录</button>
                   <a class="btn-secondary" href="/">返回首页</a>
                   <span id="statusPill" class="status-pill" hidden></span>
                 </div>
@@ -54,17 +55,31 @@
       <section class="card practice-ranking" data-interactive aria-labelledby="practiceRankingTitle">
         <div class="practice-ranking-header">
           <div>
-            <h3 id="practiceRankingTitle" class="card-title">今日训练记录</h3>
-            <p class="card-subtitle" style="margin: 4px 0 0;">仅记录当前浏览器完成的训练次数</p>
+            <h3 id="practiceRankingTitle" class="card-title">每日训练榜</h3>
+            <p class="card-subtitle" style="margin: 4px 0 0;">按今日已上传并通过校验的训练次数排序</p>
           </div>
           <span id="practiceLeaderboardTotal" class="practice-ranking-total"></span>
         </div>
         <div class="table-wrap" style="max-height: 320px;">
           <table class="rank-table">
             <thead>
-              <tr><th>序号</th><th>记录范围</th><th>完成次数</th></tr>
+              <tr><th>名次</th><th>用户名</th><th>完成次数</th></tr>
             </thead>
             <tbody id="practiceLeaderboardList"></tbody>
+          </table>
+        </div>
+      </section>
+      <section class="card practice-ranking" data-interactive aria-labelledby="trainingRecordsTitle">
+        <div class="practice-ranking-header">
+          <div>
+            <h3 id="trainingRecordsTitle" class="card-title">我的训练记录</h3>
+            <p class="card-subtitle" style="margin: 4px 0 0;">最近 50 轮已上传记录 · 北京时间</p>
+          </div>
+        </div>
+        <div class="table-wrap" style="max-height: 320px;">
+          <table class="rank-table">
+            <thead><tr><th>开始时间</th><th>结束时间</th><th>次数</th><th>方式</th></tr></thead>
+            <tbody id="trainingRecordsList"></tbody>
           </table>
         </div>
       </section>

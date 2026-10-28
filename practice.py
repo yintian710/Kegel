@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hmac
 import math
+import re
 import secrets
 import sqlite3
 
@@ -58,6 +59,107 @@ def init_schema(connection: sqlite3.Connection) -> None:
             day,user_id,username,flow_id,repetitions,completed_at)
         SELECT day,user_id,username,flow_id,3,completed_at FROM entries
         WHERE flow_id IS NOT NULL AND flow_id != ''""")
+
+    connection.execute("""CREATE TABLE IF NOT EXISTS training_records (
+        id INTEGER PRIMARY KEY, user_id TEXT NOT NULL, username TEXT NOT NULL,
+        day TEXT NOT NULL, round_id TEXT NOT NULL,
+        started_at INTEGER NOT NULL, ended_at INTEGER NOT NULL,
+        repetitions INTEGER NOT NULL CHECK(repetitions BETWEEN 1 AND 20),
+        interval_seconds INTEGER NOT NULL CHECK(interval_seconds BETWEEN 2 AND 5),
+        mode TEXT NOT NULL CHECK(mode IN ('manual','auto')),
+        received_at INTEGER NOT NULL,
+        UNIQUE(user_id,round_id), CHECK(started_at < ended_at)
+    )""")
+    connection.execute("CREATE INDEX IF NOT EXISTS training_records_day ON training_records(day,received_at,user_id)")
+    connection.execute("CREATE INDEX IF NOT EXISTS training_records_user_time ON training_records(user_id,started_at,ended_at)")
+    connection.execute("CREATE INDEX IF NOT EXISTS training_records_user_latest ON training_records(user_id,received_at DESC,id DESC)")
+
+
+_ROUND_ID_PATTERN = re.compile(r"[A-Za-z0-9_-]{16,128}")
+_TRAINING_FIELDS = ("round_id", "started_at", "ended_at", "repetitions", "interval_seconds", "mode")
+
+
+def training_record_view(row) -> dict:
+    return {field: row[field] for field in _TRAINING_FIELDS}
+
+
+def training_data(connection: sqlite3.Connection, user: dict | None, day: str) -> dict:
+    leaderboard = [dict(row) for row in connection.execute("""
+        WITH totals AS (
+            SELECT t.user_id,MAX(t.username) AS username,SUM(t.repetitions) AS count,
+                   MIN(t.received_at) AS first_received
+            FROM training_records t
+            LEFT JOIN reviews r ON r.day=t.day AND r.user_id=t.user_id
+            WHERE t.day=? AND (r.user_id IS NULL OR r.approved=1)
+            GROUP BY t.user_id
+        )
+        SELECT ROW_NUMBER() OVER (ORDER BY count DESC,first_received,user_id) AS rank,
+               username,count
+        FROM totals ORDER BY rank LIMIT 50
+    """, (day,))]
+    records = [] if user is None else [
+        training_record_view(row) for row in connection.execute(
+            "SELECT * FROM training_records WHERE user_id=? ORDER BY received_at DESC,id DESC LIMIT 50",
+            (user["id"],),
+        )
+    ]
+    return {"leaderboard": leaderboard, "records": records}
+
+
+def _training_payload(body: dict) -> dict:
+    round_id = body.get("round_id")
+    if not isinstance(round_id, str) or not _ROUND_ID_PATTERN.fullmatch(round_id):
+        raise PracticeError("训练轮次编号格式错误", 400)
+    values = {field: body.get(field) for field in ("started_at", "ended_at", "repetitions", "interval_seconds")}
+    if type(values["started_at"]) is not int or type(values["ended_at"]) is not int:
+        raise PracticeError("训练起止时间须为 Unix 毫秒整数", 400)
+    if type(values["repetitions"]) is not int or not 1 <= values["repetitions"] <= 20:
+        raise PracticeError("训练次数须为 1–20 的整数", 400)
+    if type(values["interval_seconds"]) is not int or not 2 <= values["interval_seconds"] <= 5:
+        raise PracticeError("训练间隔须为 2–5 的整数秒", 400)
+    mode = body.get("mode")
+    if not isinstance(mode, str) or mode not in {"manual", "auto"}:
+        raise PracticeError("训练模式须为 manual 或 auto", 400)
+    if values["started_at"] >= values["ended_at"]:
+        raise PracticeError("训练结束时间须晚于开始时间", 400)
+    if values["ended_at"] - values["started_at"] < values["repetitions"] * values["interval_seconds"] * 1000:
+        raise PracticeError("训练时长未达到次数与间隔要求", 400)
+    return {"round_id": round_id, **values, "mode": mode}
+
+
+def save_training_record(connection: sqlite3.Connection, user: dict, day: str, body: dict, now_ms: int):
+    if not connection.in_transaction:
+        raise RuntimeError("上传训练记录必须处于写事务内")
+    payload = _training_payload(body)
+    existing = connection.execute(
+        "SELECT * FROM training_records WHERE user_id=? AND round_id=?",
+        (user["id"], payload["round_id"]),
+    ).fetchone()
+    if existing:
+        if all(existing[field] == payload[field] for field in _TRAINING_FIELDS):
+            return existing
+        raise PracticeError("训练轮次编号已用于不同记录", 409)
+    if payload["started_at"] < now_ms - 3_600_000:
+        raise PracticeError("训练开始时间已超过一小时", 400)
+    if payload["ended_at"] < now_ms - 300_000:
+        raise PracticeError("训练结束时间已超过五分钟", 400)
+    if payload["started_at"] > now_ms + 30_000 or payload["ended_at"] > now_ms + 30_000:
+        raise PracticeError("训练时间不可超过服务器时间三十秒", 400)
+    overlap = connection.execute("""
+        SELECT 1 FROM training_records
+        WHERE user_id=? AND started_at<? AND ended_at>? LIMIT 1
+    """, (user["id"], payload["ended_at"], payload["started_at"])).fetchone()
+    if overlap:
+        raise PracticeError("训练时间与已有记录重叠", 409)
+    connection.execute("""INSERT INTO training_records(
+            user_id,username,day,round_id,started_at,ended_at,repetitions,interval_seconds,mode,received_at)
+        VALUES (?,?,?,?,?,?,?,?,?,?)""",
+        (user["id"], user["username"], day, payload["round_id"], payload["started_at"],
+         payload["ended_at"], payload["repetitions"], payload["interval_seconds"], payload["mode"], now_ms))
+    return connection.execute(
+        "SELECT * FROM training_records WHERE user_id=? AND round_id=?",
+        (user["id"], payload["round_id"]),
+    ).fetchone()
 
 
 def view(row, now: float) -> dict | None:

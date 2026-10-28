@@ -19,6 +19,10 @@ const state = {
   error: "",
   autoPaused: false,
   showResult: false,
+  training: null,
+  trainingError: "",
+  syncingTraining: false,
+  uploadError: "",
 };
 
 const textTransitions = new WeakMap();
@@ -52,7 +56,7 @@ const localPractice = practicePage ? (() => {
   }
 
   function view() {
-    if (record.day !== today()) record = { day: today(), count: 0, session: null };
+    if (record.day !== today()) record = { day: today(), count: 0, session: record.session, pending: record.pending || [] };
     const session = record.session;
     if (!session || (!session.completed && session.expires_at <= Date.now())) return null;
     return {
@@ -65,18 +69,16 @@ const localPractice = practicePage ? (() => {
 
   function status() {
     const session = view();
-    return {
-      day: record.day, session,
-      practice_leaderboard: record.count > 0 ? [{ rank: 1, username: "当前浏览器", count: record.count }] : [],
-    };
+    return { day: record.day, session };
   }
 
-  function start(selected) {
+  function start(selected, userId) {
     const active = view();
     if (active && !active.completed) return { session: active };
     const seconds = selected.intervalSeconds;
     record.session = {
       token: crypto.randomUUID(), mode: selected.mode, repetitions: selected.repetitions,
+      round_id: crypto.randomUUID(), owner_id: userId || null, started_at: Date.now(),
       interval_seconds: seconds, min_seconds: seconds, step: 0, completed: false,
       ready_at: Date.now() + seconds * 1000, expires_at: Date.now() + 600000,
     };
@@ -108,6 +110,15 @@ const localPractice = practicePage ? (() => {
       if (session.step !== session.repetitions - 1) throw new Error("请先完成本轮全部训练次数。");
       session.completed = true;
       session.step = session.repetitions;
+      session.ended_at = Date.now();
+      if (session.round_id && session.started_at) {
+        record.pending ||= [];
+        record.pending.push({
+          round_id: session.round_id, owner_id: session.owner_id,
+          started_at: session.started_at, ended_at: session.ended_at,
+          repetitions: session.repetitions, interval_seconds: session.interval_seconds, mode: session.mode,
+        });
+      }
       record.count = (Number(record.count) || 0) + session.repetitions;
       save();
     }
@@ -119,7 +130,34 @@ const localPractice = practicePage ? (() => {
     save();
   }
 
-  return { status, start, step, complete, reset };
+  function pending(userId, retryRejected = false) {
+    return (record.pending || []).filter((item) => (!item.owner_id || item.owner_id === userId) && (retryRejected || !item.error));
+  }
+
+  function bindOwner(roundId, userId) {
+    const item = record.pending.find((item) => item.round_id === roundId);
+    item.owner_id = userId;
+    if (record.session?.round_id === roundId) record.session.owner_id = userId;
+    save();
+  }
+
+  function uploaded(roundId, userId) {
+    record.pending = record.pending.filter((item) => item.round_id !== roundId);
+    if (record.session?.round_id === roundId) {
+      record.session.uploaded_user_id = userId;
+      delete record.session.upload_error;
+    }
+    save();
+  }
+
+  function rejected(roundId, message) {
+    const item = record.pending.find((item) => item.round_id === roundId);
+    item.error = message;
+    if (record.session?.round_id === roundId) record.session.upload_error = message;
+    save();
+  }
+
+  return { status, start, step, complete, reset, pending, bindOwner, uploaded, rejected };
 })() : null;
 
 function preferences() {
@@ -156,8 +194,47 @@ async function api(path, body) {
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });
   const data = await response.json().catch(() => { throw new Error("服务器响应无法读取，请稍后再试。"); });
-  if (!response.ok || data.ok === false) throw new Error(data.error || `请求失败（${response.status}）`);
+  if (!response.ok || data.ok === false) throw Object.assign(new Error(data.error || `请求失败（${response.status}）`), { status: response.status });
   return data;
+}
+
+async function refreshTraining(uploadPending = false) {
+  try {
+    state.training = await api("/api/practice");
+    state.trainingError = "";
+    if (uploadPending) await syncTraining();
+  } catch (error) {
+    state.trainingError = error.message;
+  }
+  if (state.started) render();
+}
+
+async function syncTraining(retryRejected = false) {
+  if (state.syncingTraining || !state.training?.user) return;
+  const userId = state.training.user.id;
+  state.syncingTraining = true;
+  state.uploadError = "";
+  render();
+  try {
+    for (const item of localPractice.pending(userId, retryRejected)) {
+      localPractice.bindOwner(item.round_id, userId);
+      const { owner_id, error: previousError, ...body } = item;
+      try {
+        const result = await api("/api/practice/records", { ...body, expected_user_id: userId });
+        localPractice.uploaded(item.round_id, userId);
+        state.training = result;
+      } catch (error) {
+        state.uploadError = error.message;
+        if ([400, 403, 409].includes(error.status)) localPractice.rejected(item.round_id, error.message);
+        else break;
+      }
+    }
+  } finally {
+    const local = localPractice.status().session;
+    if (local && local.round_id === state.session?.round_id) state.session = local;
+    state.syncingTraining = false;
+    render();
+  }
 }
 
 function notify(message) {
@@ -235,6 +312,8 @@ const visit = (practicePage ? Promise.resolve(localPractice.status()) : api("/ap
     state.started = true;
     if (status.session) applySession(status.session);
     render();
+    void refreshTraining(true);
+    state.poll = setInterval(() => { if (!document.hidden) void refreshTraining(); }, 20000);
   }
   return status;
 }).catch((error) => {
@@ -327,30 +406,57 @@ function renderPracticeLeaderboard() {
   const list = $("#practiceLeaderboardList");
   if (!list) return;
   list.replaceChildren();
-  const records = state.status?.practice_leaderboard || [];
-  $("#practiceLeaderboardTotal").textContent = practicePage ? "仅当前浏览器" : records.length ? `今日已有 ${records.length} 人上榜` : "今日暂无记录";
+  const records = (practicePage ? state.training?.leaderboard : state.status?.practice_leaderboard) || [];
+  $("#practiceLeaderboardTotal").textContent = state.trainingError && practicePage ? "榜单暂不可用" : records.length ? `今日已有 ${records.length} 人上榜` : "今日暂无记录";
   if (!records.length) {
     const row = document.createElement("tr");
     const cell = document.createElement("td");
     cell.colSpan = 3;
     cell.style.textAlign = "center";
     cell.style.color = "var(--text-dim)";
-    cell.textContent = practicePage ? "完成一轮训练后，本地次数会显示在这里。" : "完成一次自动练习后会显示在这里。";
+    cell.textContent = practicePage ? "登录后完成训练并上传，即可计入今日训练榜。" : "完成一次自动练习后会显示在这里。";
     row.append(cell);
     list.append(row);
     return;
   }
-  const currentUsername = state.status?.user?.username;
+  const currentUsername = (practicePage ? state.training?.user : state.status?.user)?.username;
   for (const record of records) {
     const row = document.createElement("tr");
     if (currentUsername && record.username === currentUsername) row.classList.add("current-user");
     const rankCell = document.createElement("td");
     rankCell.textContent = record.rank;
     const userCell = document.createElement("td");
-    userCell.textContent = practicePage ? record.username : currentUsername && record.username === currentUsername ? `你 (@${record.username})` : `@${record.username}`;
+    userCell.textContent = currentUsername && record.username === currentUsername ? `你 (@${record.username})` : `@${record.username}`;
     const countCell = document.createElement("td");
     countCell.textContent = `${record.count} 次`;
     row.append(rankCell, userCell, countCell);
+    list.append(row);
+  }
+}
+
+function renderTrainingRecords() {
+  const list = $("#trainingRecordsList");
+  if (!list) return;
+  list.replaceChildren();
+  const records = state.training?.records || [];
+  if (!records.length) {
+    const row = document.createElement("tr");
+    const cell = document.createElement("td");
+    cell.colSpan = 4;
+    cell.textContent = state.training?.user ? "暂无已上传的训练记录。" : "登录后可上传并查看你的训练记录。";
+    row.append(cell);
+    list.append(row);
+    return;
+  }
+  for (const record of records) {
+    const row = document.createElement("tr");
+    const values = [record.started_at, record.ended_at].map((time) => new Date(time).toLocaleString("zh-CN", { timeZone: "Asia/Shanghai", hour12: false }));
+    values.push(`${record.repetitions} 次`, record.mode === "auto" ? "自动" : "手动");
+    for (const value of values) {
+      const cell = document.createElement("td");
+      cell.textContent = value;
+      row.append(cell);
+    }
     list.append(row);
   }
 }
@@ -486,11 +592,22 @@ function renderResult() {
     if (restartButton) restartButton.disabled = state.busy;
 
     if (practicePage) {
-      setCompletionSummary("本轮练习完成", `共完成 ${repetitionCount()} 次，已记录在当前浏览器。`);
+      const user = state.training?.user;
+      const uploaded = Boolean(state.session?.uploaded_user_id);
+      const wrongUser = Boolean(state.session?.owner_id && user && state.session.owner_id !== user.id);
+      const error = state.session?.upload_error || state.uploadError || state.trainingError;
+      setCompletionSummary("本轮练习完成", `共完成 ${repetitionCount()} 次${uploaded ? "，已上传并计入训练榜。" : "，尚未计入训练榜。"}`);
       pill.hidden = false;
-      pill.className = "status-pill credited";
-      pill.textContent = "本地练习已记录";
-      note.textContent = "可以再练一轮；本地训练不影响每日打卡和积分。";
+      pill.className = uploaded ? "status-pill credited" : "status-pill";
+      pill.textContent = uploaded ? "训练记录已上传" : !state.session?.round_id ? "旧记录仅存本地" : state.syncingTraining ? "正在上传…" : error ? "上传未成功" : "等待上传";
+      const syncButton = $("#syncPracticeButton");
+      syncButton.hidden = uploaded || !state.session?.round_id;
+      syncButton.disabled = state.syncingTraining || wrongUser;
+      syncButton.textContent = user ? "上传训练记录" : "登录后上传";
+      note.textContent = !state.session?.round_id ? "旧的本地记录缺少起止时间，无法补传；请重新开始一轮训练。"
+        : wrongUser ? "此轮训练属于开始时登录的账号，请切回该账号后上传。"
+        : uploaded ? "可在下方查看本轮起止时间和次数；训练不影响每日打卡和积分。"
+        : error || "登录后上传起止时间与次数；每轮需在一小时内完成，并在结束后五分钟内提交。";
     } else if (state.entry) {
       const entry = state.entry;
       setCompletionSummary("今日第 ", "本次奖励 ", entry.rank, entry.amount);
@@ -591,11 +708,12 @@ function render() {
   ensureProgress();
   document.querySelectorAll("#progress span").forEach((dot, index) => dot.classList.toggle("active", index <= state.step));
 
-  $("#accountButton").textContent = status?.user ? `@${status.user.username} · 退出` : "LINUX DO 登录";
-  $("#accountButton").hidden = practicePage;
+  const user = (practicePage ? state.training : status)?.user;
+  $("#accountButton").textContent = user ? `@${user.username} · 退出` : "LINUX DO 登录";
+  $("#accountButton").hidden = false;
   $("#walletLink").textContent = status?.wallet ? `商店 (${status.wallet.balance})` : "商店";
   if (practicePage) {
-    $("#openingNote").textContent = "训练仅在当前浏览器运行和保存，无需登录，不影响每日打卡。";
+    $("#openingNote").textContent = "训练在本地计时；登录后上传起止时间与次数，独立统计，不影响每日打卡。";
   } else if (status) {
     $("#openingNote").textContent = status.review && !status.review.approved
       ? "今日访问待管理员确认 · 可以先练习"
@@ -612,7 +730,10 @@ function render() {
   }
   renderHint();
   renderResult();
-  if (practicePage) renderPracticeLeaderboard();
+  if (practicePage) {
+    renderPracticeLeaderboard();
+    renderTrainingRecords();
+  }
 }
 
 async function pollStatus() {
@@ -635,7 +756,7 @@ async function begin() {
   if (!state.status) applyStatus(practicePage ? localPractice.status() : await api("/api/status"));
   if (practicePage) {
     state.showResult = false;
-    applySession(localPractice.start(preferences()).session);
+    applySession(localPractice.start(preferences(), state.training?.user?.id).session);
     return;
   }
   const selected = preferences();
@@ -661,6 +782,7 @@ async function completeSession() {
     state.busy = false;
     render();
   }
+  if (practicePage && sessionCompleted()) void refreshTraining(true);
 }
 
 async function stepSession() {
@@ -716,7 +838,7 @@ async function advance() {
 }
 
 function login() {
-  if (!state.status?.oauth_ready) return notify("LINUX DO 登录暂未配置，请稍后再来。");
+  if (!(practicePage ? state.training : state.status)?.oauth_ready) return notify("LINUX DO 登录暂未配置，请稍后再来。");
   window.location.assign(`/auth/linuxdo/start?next=${practicePage ? "/practice" : "/"}`);
 }
 
@@ -739,6 +861,12 @@ $("#claimButton").addEventListener("click", async () => {
     render();
     await pollStatus();
   }
+});
+
+$("#syncPracticeButton")?.addEventListener("click", async () => {
+  await refreshTraining();
+  if (!state.training?.user) return login();
+  await syncTraining(true);
 });
 
 $("#restartButton")?.addEventListener("click", async () => {
@@ -769,7 +897,7 @@ $("#autoStopButton")?.addEventListener("click", () => {
 });
 
 $("#accountButton").addEventListener("click", () => {
-  if (state.status?.user) window.location.assign("/auth/logout");
+  if ((practicePage ? state.training : state.status)?.user) window.location.assign("/auth/logout");
   else login();
 });
 

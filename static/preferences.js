@@ -233,7 +233,7 @@
           <span class="practice-settings-toggle" aria-hidden="true"></span>
         </summary>
         <div class="practice-settings-body">
-          <p class="preference-note">训练在当前浏览器本地运行和保存，无需登录，不影响每日打卡。</p>
+          <p class="preference-note">训练在浏览器本地计时；登录后上传起止时间与次数，计入独立训练榜，不影响每日打卡。</p>
           <fieldset id="preferenceMode" class="preference-mode">
             <legend>练习方式</legend>
             <div class="preference-mode-options">

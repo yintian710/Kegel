@@ -422,6 +422,14 @@ def status_view(connection, user: dict | None, now: float, subject: str = "") ->
             "leaderboard": [dict(row) for row in connection.execute("SELECT rank,username,amount,reward_status FROM entries WHERE day=? ORDER BY rank LIMIT 50", (day["day"],))],
             "practice_leaderboard": practice_leaderboard}
 
+
+def practice_api_view(connection, user: dict | None, today: str) -> dict:
+    result = {"ok": True, "user": user,
+              "oauth_ready": bool(os.environ.get("LINUXDO_CLIENT_ID") and os.environ.get("LINUXDO_CLIENT_SECRET")),
+              "day": today}
+    result.update(practice.training_data(connection, user, today))
+    return result
+
 def admin_users(connection, query: str) -> list[dict]:
     if not isinstance(query, str) or not 1 <= len(query.strip()) <= 128:
         raise APIError("请输入用户名或用户 ID（最多 128 字符）")
@@ -634,6 +642,11 @@ class AppHandler(SimpleHTTPRequestHandler):
                 with db() as connection:
                     result = status_view(connection, self.current_user(), time.time(), self.practice_identity()["id"])
                 self.json_response(result)
+            elif parsed.path == "/api/practice":
+                user = self.current_user()
+                with db() as connection:
+                    result = practice_api_view(connection, user, day_key())
+                self.json_response(result)
             elif parsed.path == "/api/shop":
                 user = self.current_user()
                 with db() as connection:
@@ -784,6 +797,8 @@ class AppHandler(SimpleHTTPRequestHandler):
         elif path.startswith("/api/admin/"):
             self.require_admin()
             self.admin_action(path, body)
+        elif path == "/api/practice/records":
+            self.upload_training_record(body)
         elif path == "/api/session/start":
             self.start_session(body)
         elif path == "/api/session/step":
@@ -815,6 +830,21 @@ class AppHandler(SimpleHTTPRequestHandler):
             self.claim()
         else:
             raise APIError("接口不存在", 404)
+
+    def upload_training_record(self, body):
+        user = self.require_user()
+        expected_user_id = body.get("expected_user_id")
+        if expected_user_id is not None and expected_user_id != user["id"]:
+            raise APIError("登录账号已切换，请刷新后重新训练", 409)
+        now = time.time()
+        today = day_key(now)
+        with db() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            check_review(connection, user["id"], today)
+            row = practice.save_training_record(connection, user, today, body, int(now * 1000))
+            result = practice_api_view(connection, user, today)
+            result["record"] = practice.training_record_view(row)
+        self.json_response(result)
 
     def record_practice_attempt(self, skip_auto_step: bool = False):
         user = self.current_user()

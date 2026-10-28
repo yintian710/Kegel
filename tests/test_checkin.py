@@ -126,6 +126,189 @@ class CheckinBehavior(unittest.TestCase):
         self.assertTrue(result["session"]["completed"])
         return result
 
+    def training_upload(self, suffix, **changes):
+        repetitions = changes.get("repetitions", 2)
+        interval_seconds = changes.get("interval_seconds", 2)
+        ended_at = changes.get("ended_at", int(app.time.time() * 1000))
+        body = {
+            "round_id": f"training-round-{suffix}",
+            "started_at": ended_at - repetitions * interval_seconds * 1000,
+            "ended_at": ended_at,
+            "repetitions": repetitions,
+            "interval_seconds": interval_seconds,
+            "mode": "auto",
+        }
+        body.update(changes)
+        return body
+
+    def test_training_upload_authentication_identity_review_and_public_read(self):
+        code, guest = self.request("/api/practice")
+        self.assertEqual(code, 200)
+        self.assertEqual(set(guest), {"ok", "user", "oauth_ready", "day", "leaderboard", "records"})
+        self.assertIsNone(guest["user"])
+        self.assertEqual((guest["leaderboard"], guest["records"]), ([], []))
+
+        body = self.training_upload("identity-000001", expected_user_id="1", user_id="999", username="spoofed")
+        self.assertEqual(self.request("/api/practice/records", body)[0], 401)
+        self.assertEqual(self.request("/api/practice/records", body, user=2)[0], 409)
+        code, result = self.request("/api/practice/records", body, user=1)
+        self.assertEqual(code, 200, result)
+        self.assertEqual(set(result), {"ok", "user", "oauth_ready", "day", "leaderboard", "records", "record"})
+        self.assertEqual(result["user"]["id"], "1")
+        self.assertEqual(result["record"], {key: body[key] for key in (
+            "round_id", "started_at", "ended_at", "repetitions", "interval_seconds", "mode")})
+        with app.db() as connection:
+            stored = connection.execute("SELECT user_id,username,day,received_at FROM training_records").fetchone()
+            self.assertEqual(tuple(stored), ("1", "user1", "2026-10-26", int(self.now * 1000)))
+
+        user2_body = self.training_upload("reviewed-0000001", expected_user_id="2")
+        self.assertEqual(self.request("/api/practice/records", user2_body, user=2)[0], 200)
+        with app.db() as connection:
+            connection.execute("INSERT INTO reviews(day,user_id,reason) VALUES (?,?,?)",
+                               (app.day_key(), "2", "fixed interval"))
+        state = self.request("/api/practice", user=2)[1]
+        self.assertEqual([(row["username"], row["count"]) for row in state["leaderboard"]], [("user1", 2)])
+        self.assertEqual(len(state["records"]), 1)
+        blocked = self.training_upload("reviewed-0000002", expected_user_id="2",
+                                       started_at=int(app.time.time() * 1000),
+                                       ended_at=int(app.time.time() * 1000) + 4000)
+        self.assertEqual(self.request("/api/practice/records", blocked, user=2)[0], 403)
+
+    def test_training_upload_counts_without_modifying_checkin_and_works_before_open(self):
+        first = self.training_upload("count-user1-0001", repetitions=3)
+        second = self.training_upload("count-user2-0001", repetitions=5)
+        self.assertEqual(self.request("/api/practice/records", first, user=1)[0], 200)
+        code, result = self.request("/api/practice/records", second, user=2)
+        self.assertEqual(code, 200, result)
+        self.assertEqual(result["leaderboard"], [
+            {"rank": 1, "username": "user2", "count": 5},
+            {"rank": 2, "username": "user1", "count": 3},
+        ])
+        with app.db() as connection:
+            counts = tuple(connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+                           for table in ("days", "sessions", "entries", "practice_completions"))
+        self.assertEqual(counts, (0, 0, 0, 0))
+        status = self.request("/api/status", user=1)[1]
+        self.assertFalse(status["is_open"])
+        self.assertEqual((status["total"], status["entry"], status["session"], status["practice_leaderboard"]),
+                         (0, None, None, []))
+
+    def test_training_upload_is_idempotent_and_round_ids_are_user_scoped(self):
+        body = self.training_upload("idempotent-00001", expected_user_id="1")
+        self.assertEqual(self.request("/api/practice/records", body, user=1)[0], 200)
+        app.time.time.return_value += 7200
+        code, replay = self.request("/api/practice/records", body, user=1)
+        self.assertEqual(code, 200, replay)
+        changed = dict(body, ended_at=body["ended_at"] + 1)
+        self.assertEqual(self.request("/api/practice/records", changed, user=1)[0], 409)
+        app.time.time.return_value = self.now
+        same_id_other_user = dict(body, expected_user_id="2")
+        self.assertEqual(self.request("/api/practice/records", same_id_other_user, user=2)[0], 200)
+        with app.db() as connection:
+            rows = connection.execute("SELECT user_id,round_id FROM training_records ORDER BY user_id").fetchall()
+        self.assertEqual([tuple(row) for row in rows], [("1", body["round_id"]), ("2", body["round_id"])])
+
+    def test_training_read_limits_leaderboard_and_user_history_to_fifty(self):
+        today = app.day_key()
+        with app.db() as connection:
+            for index in range(51):
+                connection.execute("""INSERT INTO training_records(
+                        user_id,username,day,round_id,started_at,ended_at,repetitions,interval_seconds,mode,received_at)
+                    VALUES (?,?,?,?,?,?,?,?,?,?)""",
+                    ("1", "user1", today, f"history-record-{index:04d}", index * 10_000,
+                     index * 10_000 + 4000, 2, 2, "auto", index))
+            for user in range(2, 53):
+                connection.execute("""INSERT INTO training_records(
+                        user_id,username,day,round_id,started_at,ended_at,repetitions,interval_seconds,mode,received_at)
+                    VALUES (?,?,?,?,?,?,?,?,?,?)""",
+                    (str(user), f"user{user}", today, f"leaderboard-user-{user:04d}", 0, 2000,
+                     1, 2, "manual", user))
+            connection.execute("""INSERT INTO practice_completions(
+                    day,user_id,username,flow_id,repetitions,completed_at)
+                VALUES (?,?,?,?,?,?)""", (today, "999", "legacy-user", "legacy-flow", 20, self.now))
+        result = self.request("/api/practice", user=1)[1]
+        self.assertEqual((len(result["leaderboard"]), len(result["records"])), (50, 50))
+        self.assertEqual(result["leaderboard"][0], {"rank": 1, "username": "user1", "count": 102})
+        self.assertEqual([row["rank"] for row in result["leaderboard"]], list(range(1, 51)))
+        self.assertNotIn("legacy-user", [row["username"] for row in result["leaderboard"]])
+        self.assertEqual(result["records"][0]["round_id"], "history-record-0050")
+        self.assertEqual(result["records"][-1]["round_id"], "history-record-0001")
+        self.assertEqual(set(result["records"][0]), {
+            "round_id", "started_at", "ended_at", "repetitions", "interval_seconds", "mode",
+        })
+
+    def test_training_upload_overlap_allows_touching_across_beijing_midnight(self):
+        before_midnight = self.now + 15 * 3600 + 59 * 60 + 58
+        app.time.time.return_value = before_midnight
+        first_end = int(before_midnight * 1000)
+        first = self.training_upload("midnight-first-01", started_at=first_end - 4000, ended_at=first_end)
+        self.assertEqual(self.request("/api/practice/records", first, user=1)[0], 200)
+        app.time.time.return_value = before_midnight + 10
+        overlap = self.training_upload("midnight-overlap1", started_at=first_end - 1000, ended_at=first_end + 7000)
+        self.assertEqual(self.request("/api/practice/records", overlap, user=1)[0], 409)
+        touching = self.training_upload("midnight-touching1", started_at=first_end, ended_at=first_end + 8000)
+        code, result = self.request("/api/practice/records", touching, user=1)
+        self.assertEqual(code, 200, result)
+        self.assertEqual(result["day"], "2026-10-27")
+        with app.db() as connection:
+            rows = connection.execute("SELECT day,started_at,ended_at FROM training_records ORDER BY started_at").fetchall()
+        self.assertEqual([(row["day"], row["started_at"], row["ended_at"]) for row in rows], [
+            ("2026-10-26", first["started_at"], first["ended_at"]),
+            ("2026-10-27", touching["started_at"], touching["ended_at"]),
+        ])
+
+    def test_training_upload_validates_numbers_duration_and_time_bounds(self):
+        now_ms = int(app.time.time() * 1000)
+        base = self.training_upload("validation-000001")
+        invalid_changes = [
+            {"round_id": "short"},
+            {"round_id": "训练轮次编号训练轮次编号"},
+            {"started_at": True}, {"ended_at": float("nan")},
+            {"repetitions": 0}, {"repetitions": 21}, {"repetitions": True},
+            {"repetitions": float("inf")},
+            {"interval_seconds": 1}, {"interval_seconds": 6}, {"interval_seconds": False},
+            {"interval_seconds": 2.5}, {"mode": "timed"}, {"mode": []},
+            {"started_at": now_ms, "ended_at": now_ms},
+            {"started_at": now_ms - 3999, "ended_at": now_ms},
+            {"started_at": now_ms - 3_600_001, "ended_at": now_ms},
+            {"started_at": now_ms - 304_001, "ended_at": now_ms - 300_001},
+            {"started_at": now_ms + 30_001, "ended_at": now_ms + 34_001},
+            {"started_at": now_ms + 26_001, "ended_at": now_ms + 30_001},
+        ]
+        for index, changes in enumerate(invalid_changes):
+            with self.subTest(case=index):
+                body = dict(base)
+                body["round_id"] = f"invalid-case-{index:04d}"
+                body.update(changes)
+                self.assertEqual(self.request("/api/practice/records", body, user=99)[0], 400)
+
+        oldest = self.training_upload("boundary-oldest-1", repetitions=20, interval_seconds=5,
+                                      started_at=now_ms - 3_600_000, ended_at=now_ms - 300_000)
+        future = self.training_upload("boundary-future-1", repetitions=1, interval_seconds=5, mode="manual",
+                                      started_at=now_ms + 25_000, ended_at=now_ms + 30_000)
+        self.assertEqual(self.request("/api/practice/records", oldest, user=90)[0], 200)
+        self.assertEqual(self.request("/api/practice/records", future, user=91)[0], 200)
+
+    def test_concurrent_training_uploads_serialize_replays_and_overlaps(self):
+        replay = self.training_upload("parallel-replay01", expected_user_id="1")
+        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
+            replay_results = list(pool.map(
+                lambda _: self.request("/api/practice/records", replay, user=1), range(8)))
+        self.assertTrue(all(code == 200 and value["record"] == replay_results[0][1]["record"]
+                            for code, value in replay_results))
+        with app.db() as connection:
+            self.assertEqual(connection.execute("SELECT COUNT(*) FROM training_records WHERE user_id='1'").fetchone()[0], 1)
+
+        now_ms = int(app.time.time() * 1000)
+        first = self.training_upload("parallel-overlap1", started_at=now_ms - 8000, ended_at=now_ms - 4000)
+        second = self.training_upload("parallel-overlap2", started_at=now_ms - 6000, ended_at=now_ms)
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+            overlap_results = list(pool.map(
+                lambda body: self.request("/api/practice/records", body, user=2), (first, second)))
+        self.assertEqual(sorted(code for code, _ in overlap_results), [200, 409])
+        with app.db() as connection:
+            self.assertEqual(connection.execute("SELECT COUNT(*) FROM training_records WHERE user_id='2'").fetchone()[0], 1)
+
     def test_auto_round_counts_repeat_without_duplicate_daily_rewards(self):
         self.open()
         first = self.auto_round(1, 20)
@@ -194,6 +377,7 @@ class CheckinBehavior(unittest.TestCase):
             for path in ("/", "/index.html", "/practice", "/practice.html"):
                 self.assertEqual(self.auth_response(path)[0], 200)
             self.assertEqual(self.request("/api/status")[0], 200)
+            self.assertEqual(self.request("/api/practice")[0], 200)
             for path in ("/api/shop", "/api/donations"):
                 self.assertEqual(self.request(path)[0], 401)
             self.assertEqual(self.request("/api/visit", {})[0], 200)
