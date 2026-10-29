@@ -144,16 +144,16 @@ class CheckinBehavior(unittest.TestCase):
     def test_training_upload_authentication_identity_review_and_public_read(self):
         code, guest = self.request("/api/practice")
         self.assertEqual(code, 200)
-        self.assertEqual(set(guest), {"ok", "user", "oauth_ready", "day", "leaderboard", "records"})
+        self.assertEqual(set(guest), {"ok", "user", "oauth_ready", "day", "leaderboard", "total_leaderboard", "records"})
         self.assertIsNone(guest["user"])
-        self.assertEqual((guest["leaderboard"], guest["records"]), ([], []))
+        self.assertEqual((guest["leaderboard"], guest["total_leaderboard"], guest["records"]), ([], [], []))
 
         body = self.training_upload("identity-000001", expected_user_id="1", user_id="999", username="spoofed")
         self.assertEqual(self.request("/api/practice/records", body)[0], 401)
         self.assertEqual(self.request("/api/practice/records", body, user=2)[0], 409)
         code, result = self.request("/api/practice/records", body, user=1)
         self.assertEqual(code, 200, result)
-        self.assertEqual(set(result), {"ok", "user", "oauth_ready", "day", "leaderboard", "records", "record"})
+        self.assertEqual(set(result), {"ok", "user", "oauth_ready", "day", "leaderboard", "total_leaderboard", "records", "record"})
         self.assertEqual(result["user"]["id"], "1")
         self.assertEqual(result["record"], {key: body[key] for key in (
             "round_id", "started_at", "ended_at", "repetitions", "interval_seconds", "mode")})
@@ -168,6 +168,7 @@ class CheckinBehavior(unittest.TestCase):
                                (app.day_key(), "2", "fixed interval"))
         state = self.request("/api/practice", user=2)[1]
         self.assertEqual([(row["username"], row["count"]) for row in state["leaderboard"]], [("user1", 2)])
+        self.assertEqual(state["total_leaderboard"], state["leaderboard"])
         self.assertEqual(len(state["records"]), 1)
         blocked = self.training_upload("reviewed-0000002", expected_user_id="2",
                                        started_at=int(app.time.time() * 1000),
@@ -186,12 +187,12 @@ class CheckinBehavior(unittest.TestCase):
         ])
         with app.db() as connection:
             counts = tuple(connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
-                           for table in ("days", "sessions", "entries", "practice_completions"))
-        self.assertEqual(counts, (0, 0, 0, 0))
+                           for table in ("days", "sessions", "entries"))
+        self.assertEqual(counts, (0, 0, 0))
         status = self.request("/api/status", user=1)[1]
         self.assertFalse(status["is_open"])
-        self.assertEqual((status["total"], status["entry"], status["session"], status["practice_leaderboard"]),
-                         (0, None, None, []))
+        self.assertEqual((status["total"], status["entry"], status["session"]), (0, None, None))
+        self.assertNotIn("practice_leaderboard", status)
 
     def test_training_upload_is_idempotent_and_round_ids_are_user_scoped(self):
         body = self.training_upload("idempotent-00001", expected_user_id="1")
@@ -223,19 +224,58 @@ class CheckinBehavior(unittest.TestCase):
                     VALUES (?,?,?,?,?,?,?,?,?,?)""",
                     (str(user), f"user{user}", today, f"leaderboard-user-{user:04d}", 0, 2000,
                      1, 2, "manual", user))
-            connection.execute("""INSERT INTO practice_completions(
-                    day,user_id,username,flow_id,repetitions,completed_at)
-                VALUES (?,?,?,?,?,?)""", (today, "999", "legacy-user", "legacy-flow", 20, self.now))
         result = self.request("/api/practice", user=1)[1]
-        self.assertEqual((len(result["leaderboard"]), len(result["records"])), (50, 50))
+        self.assertEqual((len(result["leaderboard"]), len(result["total_leaderboard"]), len(result["records"])), (50, 50, 50))
         self.assertEqual(result["leaderboard"][0], {"rank": 1, "username": "user1", "count": 102})
         self.assertEqual([row["rank"] for row in result["leaderboard"]], list(range(1, 51)))
-        self.assertNotIn("legacy-user", [row["username"] for row in result["leaderboard"]])
+        self.assertEqual(result["total_leaderboard"], result["leaderboard"])
         self.assertEqual(result["records"][0]["round_id"], "history-record-0050")
         self.assertEqual(result["records"][-1]["round_id"], "history-record-0001")
         self.assertEqual(set(result["records"][0]), {
             "round_id", "started_at", "ended_at", "repetitions", "interval_seconds", "mode",
         })
+
+    def test_training_total_leaderboard_accumulates_across_days_without_replays(self):
+        first = self.training_upload("total-first-user1", repetitions=5)
+        self.assertEqual(self.request("/api/practice/records", first, user=1)[0], 200)
+        self.assertEqual(self.request("/api/practice/records", self.training_upload("total-first-user2", repetitions=2), user=2)[0], 200)
+        app.time.time.return_value += 86400
+        self.assertEqual(self.request("/api/practice/records", self.training_upload("total-next-user1", repetitions=1), user=1)[0], 200)
+        self.assertEqual(self.request("/api/practice/records", self.training_upload("total-next-user2", repetitions=3), user=2)[0], 200)
+        code, result = self.request("/api/practice/records", first, user=1)
+        self.assertEqual(code, 200, result)
+        self.assertEqual(result["leaderboard"], [
+            {"rank": 1, "username": "user2", "count": 3},
+            {"rank": 2, "username": "user1", "count": 1},
+        ])
+        self.assertEqual(result["total_leaderboard"], [
+            {"rank": 1, "username": "user1", "count": 6},
+            {"rank": 2, "username": "user2", "count": 5},
+        ])
+
+    def test_removing_legacy_leaderboard_preserves_checkin_rewards_and_uploaded_training(self):
+        self.open()
+        entry = self.complete(1)
+        uploaded = self.training_upload("migration-record01")
+        self.assertEqual(self.request("/api/practice/records", uploaded, user=1)[0], 200)
+        with app.db() as connection:
+            connection.execute("""CREATE TABLE practice_completions (
+                id INTEGER PRIMARY KEY, day TEXT NOT NULL, user_id TEXT NOT NULL,
+                username TEXT NOT NULL, flow_id TEXT NOT NULL UNIQUE,
+                repetitions INTEGER NOT NULL, completed_at REAL NOT NULL)""")
+            connection.execute("INSERT INTO practice_completions(day,user_id,username,flow_id,repetitions,completed_at) VALUES (?,?,?,?,?,?)",
+                               (app.day_key(), "1", "user1", entry["flow_id"], 3, app.time.time()))
+        app.init_db()
+        app.init_db()
+        with app.db() as connection:
+            self.assertIsNone(connection.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='practice_completions'").fetchone())
+        status = self.request("/api/status", user=1)[1]
+        self.assertNotIn("practice_leaderboard", status)
+        self.assertEqual(status["entry"]["flow_id"], entry["flow_id"])
+        self.assertEqual(self.request("/api/claim", {}, user=1)[1]["wallet"]["balance"], entry["amount"])
+        practice_state = self.request("/api/practice", user=1)[1]
+        self.assertEqual(practice_state["records"][0]["round_id"], uploaded["round_id"])
+        self.assertEqual(practice_state["total_leaderboard"], [{"rank": 1, "username": "user1", "count": 2}])
 
     def test_training_upload_overlap_allows_touching_across_beijing_midnight(self):
         before_midnight = self.now + 15 * 3600 + 59 * 60 + 58
@@ -266,7 +306,7 @@ class CheckinBehavior(unittest.TestCase):
             {"started_at": True}, {"ended_at": float("nan")},
             {"repetitions": 0}, {"repetitions": 21}, {"repetitions": True},
             {"repetitions": float("inf")},
-            {"interval_seconds": 1}, {"interval_seconds": 6}, {"interval_seconds": False},
+            {"interval_seconds": 1}, {"interval_seconds": 11}, {"interval_seconds": False},
             {"interval_seconds": 2.5}, {"mode": "timed"}, {"mode": []},
             {"started_at": now_ms, "ended_at": now_ms},
             {"started_at": now_ms - 3999, "ended_at": now_ms},
@@ -282,10 +322,10 @@ class CheckinBehavior(unittest.TestCase):
                 body.update(changes)
                 self.assertEqual(self.request("/api/practice/records", body, user=99)[0], 400)
 
-        oldest = self.training_upload("boundary-oldest-1", repetitions=20, interval_seconds=5,
+        oldest = self.training_upload("boundary-oldest-1", repetitions=20, interval_seconds=10,
                                       started_at=now_ms - 3_600_000, ended_at=now_ms - 300_000)
-        future = self.training_upload("boundary-future-1", repetitions=1, interval_seconds=5, mode="manual",
-                                      started_at=now_ms + 25_000, ended_at=now_ms + 30_000)
+        future = self.training_upload("boundary-future-1", repetitions=1, interval_seconds=10, mode="manual",
+                                      started_at=now_ms + 20_000, ended_at=now_ms + 30_000)
         self.assertEqual(self.request("/api/practice/records", oldest, user=90)[0], 200)
         self.assertEqual(self.request("/api/practice/records", future, user=91)[0], 200)
 
@@ -309,7 +349,7 @@ class CheckinBehavior(unittest.TestCase):
         with app.db() as connection:
             self.assertEqual(connection.execute("SELECT COUNT(*) FROM training_records WHERE user_id='2'").fetchone()[0], 1)
 
-    def test_auto_round_counts_repeat_without_duplicate_daily_rewards(self):
+    def test_repeated_automatic_sessions_do_not_duplicate_daily_rewards(self):
         self.open()
         first = self.auto_round(1, 20)
         self.assertIsNotNone(first["entry"])
@@ -317,8 +357,6 @@ class CheckinBehavior(unittest.TestCase):
         self.assertEqual(self.request("/api/claim", {}, user=1)[0], 200)
         self.auto_round(2, 3)
         state = self.request("/api/status", user=1)[1]
-        self.assertEqual([(row["username"], row["count"]) for row in state["practice_leaderboard"]],
-                         [("user1", 21), ("user2", 3)])
         self.assertEqual(state["total"], 2)
         self.assertEqual(state["entry"]["rank"], 1)
         self.assertEqual(state["wallet"]["balance"], 1000)
@@ -335,14 +373,13 @@ class CheckinBehavior(unittest.TestCase):
         }, user=1)
         token = result["session"]["token"]
         self.assertEqual(self.request("/api/session/complete", {"token": token}, user=1)[0], 429)
-        self.assertEqual(self.request("/api/status", user=1)[1]["practice_leaderboard"], [])
         app.time.time.return_value += 2
         code, result = self.request("/api/session/complete", {"token": token}, user=1)
         self.assertEqual(code, 200, result)
         self.assertIsNone(result["entry"])
-        self.assertEqual(self.request("/api/status", user=1)[1]["practice_leaderboard"][0]["count"], 1)
-        self.request("/api/session/complete", {"token": result["session"]["token"]}, user=1)
-        self.assertEqual(self.request("/api/status", user=1)[1]["practice_leaderboard"][0]["count"], 1)
+        code, repeated = self.request("/api/session/complete", {"token": result["session"]["token"]}, user=1)
+        self.assertEqual(code, 200, repeated)
+        self.assertEqual(repeated["session"], result["session"])
 
     def test_manual_practice_can_repeat_without_replacing_daily_reward(self):
         self.open()
@@ -350,7 +387,6 @@ class CheckinBehavior(unittest.TestCase):
         second = self.complete(1)
         self.assertEqual(second["flow_id"], first["flow_id"])
         state = self.request("/api/status", user=1)[1]
-        self.assertEqual(state["practice_leaderboard"][0]["count"], 6)
         self.assertEqual(state["total"], 1)
         self.assertEqual(self.request("/api/claim", {}, user=1)[1]["wallet"]["balance"], 1000)
 

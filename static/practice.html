@@ -32,6 +32,7 @@
             <h1 id="prompt" class="landing-prompt" aria-live="polite" aria-atomic="true">开始第 1 次？</h1>
             <p id="stageHint" class="landing-sub"><span id="stageHintText">先设置练习方式，点击这里开始</span><span id="stageCountdown"></span></p>
             <button id="autoStopButton" class="btn-secondary auto-stop-button" type="button" data-interactive hidden>停止自动练习</button>
+            <button id="abandonRoundButton" class="btn-secondary auto-stop-button" type="button" data-interactive hidden>放弃本轮</button>
             <div id="progress" class="dots-progress" aria-label="练习进度" hidden></div>
           </div>
           <section id="result" class="completion-container" data-interactive hidden>
@@ -66,6 +67,21 @@
               <tr><th>名次</th><th>用户名</th><th>完成次数</th></tr>
             </thead>
             <tbody id="practiceLeaderboardList"></tbody>
+          </table>
+        </div>
+      </section>
+      <section class="card practice-ranking" data-interactive aria-labelledby="totalPracticeRankingTitle">
+        <div class="practice-ranking-header">
+          <div>
+            <h3 id="totalPracticeRankingTitle" class="card-title">训练总榜</h3>
+            <p class="card-subtitle" style="margin: 4px 0 0;">按所有日期已上传并通过校验的累计训练次数排序</p>
+          </div>
+          <span id="totalPracticeLeaderboardTotal" class="practice-ranking-total"></span>
+        </div>
+        <div class="table-wrap" style="max-height: 320px;">
+          <table class="rank-table">
+            <thead><tr><th>名次</th><th>用户名</th><th>累计次数</th></tr></thead>
+            <tbody id="totalPracticeLeaderboardList"></tbody>
           </table>
         </div>
       </section>

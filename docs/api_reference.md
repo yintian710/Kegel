@@ -60,7 +60,7 @@
 
 ### 2.1 查询当日打卡状态与公开榜单
 - **路径**：`GET /api/status`
-- **认证**：无需登录；访客返回 `user: null`。新增 `practice_leaderboard: [{"rank":1,"username":"alice","count":20}]`，按当日完成练习总次数排序，原 `leaderboard` 继续展示每日奖励名次。
+- **认证**：无需登录；访客返回 `user: null`。`leaderboard` 仅展示每日打卡奖励名次，不返回训练榜数据；训练榜统一由 `/api/practice` 提供。
 - **响应示例**：
 ```json
 {
@@ -144,8 +144,8 @@
 
 #### 独立训练记录
 
-- `GET /api/practice`：公开读取训练页面数据，返回 `{ok,user,oauth_ready,day,leaderboard,records}`。`leaderboard` 是当日通过校验的独立训练次数前 50 名（`rank,username,count`）；`records` 仅包含当前登录账号最近 50 轮记录，访客为空。
-- `POST /api/practice/records`：须登录，请求体示例为 `{"round_id":"12891f40-4e3f-4a38-8c3d-bc1f4a850bb2","started_at":1790000000000,"ended_at":1790000030000,"repetitions":10,"interval_seconds":3,"mode":"auto","expected_user_id":"123"}`。实际起止时间须满足下述时效范围，两个时间为 Unix 毫秒整数；方式为 `manual` 或 `auto`，次数 1–20 整数、间隔 2–5 整数秒。响应包含与 GET 相同的数据及本次 `record`。
+- `GET /api/practice`：公开读取训练页面数据，返回 `{ok,user,oauth_ready,day,leaderboard,total_leaderboard,records}`。`leaderboard` 是当日有效独立训练次数榜，`total_leaderboard` 是跨所有日期累计的总榜，两者均包含 `rank,username,count`，各限前 50 名，并统一排除待审核日期的记录；同分按最早上传时间、用户 ID 排序。`records` 仅包含当前登录账号最近 50 轮记录，访客为空。上传接口同样返回每日榜和总榜，重复提交不重复计入任一榜单。
+- `POST /api/practice/records`：须登录，请求体示例为 `{"round_id":"12891f40-4e3f-4a38-8c3d-bc1f4a850bb2","started_at":1790000000000,"ended_at":1790000030000,"repetitions":10,"interval_seconds":3,"mode":"auto","expected_user_id":"123"}`。实际起止时间须满足下述时效范围，两个时间为 Unix 毫秒整数；方式为 `manual` 或 `auto`，实际完成次数 1–20 整数、每次时长 `interval_seconds` 为 2–10 整数秒。放弃本轮时仅提交完整完成的次数，零次不提交；三阶段比例由浏览器保存，不参与服务端计数。响应包含与 GET 相同的数据及本次 `record`。
 - 记录归属取服务端登录身份；可选 `expected_user_id` 仅校验账号是否切换，不用于指定归属。身份不匹配或同一轮内容冲突返回 `409`，未登录返回 `401`，待审核用户返回 `403`。
 - 时间须满足开始早于结束、总时长至少为次数乘间隔；开始不早于当前一小时、结束不早于当前五分钟，最多允许未来 30 秒。非法输入返回 `400`。同用户的时间区间跨日也不得重叠，端点相接允许，重叠返回 `409`。
 - 同用户同 `round_id` 的相同内容原样重传幂等成功，即使原时间窗口已经过期也不会重复累计；同编号修改内容返回 `409`。每条记录保存用户、起止时间、次数、方式、间隔、服务端接收日期和接收时间；每日训练榜按接收日期统计。不同用户独立校验。

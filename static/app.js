@@ -32,6 +32,7 @@ let desiredViewUpdate = null;
 let viewTransitionRunning = false;
 let autoPromptAnimation = null;
 let autoPromptToken = null;
+let phasePromptTimer = null;
 
 const localPractice = practicePage ? (() => {
   const storageName = "local_training_v1";
@@ -80,6 +81,8 @@ const localPractice = practicePage ? (() => {
       token: crypto.randomUUID(), mode: selected.mode, repetitions: selected.repetitions,
       round_id: crypto.randomUUID(), owner_id: userId || null, started_at: Date.now(),
       interval_seconds: seconds, min_seconds: seconds, step: 0, completed: false,
+      lift_end: selected.liftEnd, relax_end: selected.relaxEnd,
+      phase_names: selected.phaseNames,
       ready_at: Date.now() + seconds * 1000, expires_at: Date.now() + 600000,
     };
     save();
@@ -104,22 +107,27 @@ const localPractice = practicePage ? (() => {
     return { session: view() };
   }
 
-  function complete(token) {
-    const session = current(token);
+  function complete(token, abandon = false) {
+    const active = view();
+    if (!active || active.token !== token) throw new Error("本轮训练已失效，请重新开始。");
+    const session = record.session;
     if (!session.completed) {
-      if (session.step !== session.repetitions - 1) throw new Error("请先完成本轮全部训练次数。");
+      if (!abandon && (session.step !== session.repetitions - 1 || session.ready_at > Date.now())) throw new Error("请先完成本轮全部训练次数。");
+      const completed = Math.min(session.repetitions, session.step + (Date.now() >= session.ready_at ? 1 : 0));
+      session.abandoned = abandon;
+      session.completed_repetitions = completed;
       session.completed = true;
       session.step = session.repetitions;
       session.ended_at = Date.now();
-      if (session.round_id && session.started_at) {
+      if (completed > 0 && session.round_id && session.started_at) {
         record.pending ||= [];
         record.pending.push({
           round_id: session.round_id, owner_id: session.owner_id,
           started_at: session.started_at, ended_at: session.ended_at,
-          repetitions: session.repetitions, interval_seconds: session.interval_seconds, mode: session.mode,
+          repetitions: completed, interval_seconds: session.interval_seconds, mode: session.mode,
         });
       }
-      record.count = (Number(record.count) || 0) + session.repetitions;
+      record.count = (Number(record.count) || 0) + completed;
       save();
     }
     return { session: view() };
@@ -402,24 +410,23 @@ function renderLeaderboard() {
   }
 }
 
-function renderPracticeLeaderboard() {
-  const list = $("#practiceLeaderboardList");
+function renderPracticeLeaderboard(listSelector, totalSelector, records, allTime = false) {
+  const list = $(listSelector);
   if (!list) return;
   list.replaceChildren();
-  const records = (practicePage ? state.training?.leaderboard : state.status?.practice_leaderboard) || [];
-  $("#practiceLeaderboardTotal").textContent = state.trainingError && practicePage ? "榜单暂不可用" : records.length ? `今日已有 ${records.length} 人上榜` : "今日暂无记录";
+  $(totalSelector).textContent = state.trainingError ? "榜单暂不可用" : records.length ? `${allTime ? "累计" : "今日"} · 展示 ${records.length} 人` : "暂无记录";
   if (!records.length) {
     const row = document.createElement("tr");
     const cell = document.createElement("td");
     cell.colSpan = 3;
     cell.style.textAlign = "center";
     cell.style.color = "var(--text-dim)";
-    cell.textContent = practicePage ? "登录后完成训练并上传，即可计入今日训练榜。" : "完成一次自动练习后会显示在这里。";
+    cell.textContent = "登录后完成训练并上传，即可计入训练榜。";
     row.append(cell);
     list.append(row);
     return;
   }
-  const currentUsername = (practicePage ? state.training?.user : state.status?.user)?.username;
+  const currentUsername = state.training?.user?.username;
   for (const record of records) {
     const row = document.createElement("tr");
     if (currentUsername && record.username === currentUsername) row.classList.add("current-user");
@@ -465,24 +472,26 @@ function wait(milliseconds) {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
-function renderAutoPrompt(element, text) {
-  if (autoPromptToken === state.session.token) return;
+function renderAutoPrompt(element, text, phase = null) {
+  const token = phase ? `${state.session.token}:${phase.index}` : state.session.token;
+  if (autoPromptToken === token) return;
   autoPromptAnimation?.cancel();
-  autoPromptToken = state.session.token;
+  autoPromptToken = token;
   element.dataset.autoPrompt = "";
   element.classList.remove("practice-text-fading");
   textTransitions.delete(element);
   element.textContent = text;
-  const duration = state.session.interval_seconds * 1000;
+  const duration = phase ? phase.endsAt - phase.startsAt : state.session.interval_seconds * 1000;
   autoPromptAnimation = element.animate([
     { opacity: 0, offset: 0 },
-    { opacity: 1, offset: 0.5 },
+    { opacity: 1, offset: phase ? 2 / 3 : 0.5 },
     { opacity: 0, offset: 1 },
   ], { duration, easing: "linear", fill: "both" });
-  autoPromptAnimation.currentTime = Math.min(duration, Math.max(0, duration - (state.readyAt - Date.now())));
+  autoPromptAnimation.currentTime = Math.min(duration, Math.max(0, phase ? Date.now() - phase.startsAt : duration - (state.readyAt - Date.now())));
 }
 
 function stopAutoPrompt(element) {
+  clearTimeout(phasePromptTimer);
   autoPromptAnimation?.cancel();
   autoPromptAnimation = null;
   autoPromptToken = null;
@@ -596,15 +605,16 @@ function renderResult() {
       const uploaded = Boolean(state.session?.uploaded_user_id);
       const wrongUser = Boolean(state.session?.owner_id && user && state.session.owner_id !== user.id);
       const error = state.session?.upload_error || state.uploadError || state.trainingError;
-      setCompletionSummary("本轮练习完成", `共完成 ${repetitionCount()} 次${uploaded ? "，已上传并计入训练榜。" : "，尚未计入训练榜。"}`);
+      const completed = state.session?.completed_repetitions ?? repetitionCount();
+      setCompletionSummary(state.session?.abandoned ? "本轮已放弃" : "本轮练习完成", `共完成 ${completed} 次${completed === 0 ? "，未产生训练记录。" : uploaded ? "，已上传并计入训练榜。" : "，尚未计入训练榜。"}`);
       pill.hidden = false;
       pill.className = uploaded ? "status-pill credited" : "status-pill";
-      pill.textContent = uploaded ? "训练记录已上传" : !state.session?.round_id ? "旧记录仅存本地" : state.syncingTraining ? "正在上传…" : error ? "上传未成功" : "等待上传";
+      pill.textContent = completed === 0 ? "未完成任何次数" : uploaded ? "训练记录已上传" : !state.session?.round_id ? "旧记录仅存本地" : state.syncingTraining ? "正在上传…" : error ? "上传未成功" : "等待上传";
       const syncButton = $("#syncPracticeButton");
-      syncButton.hidden = uploaded || !state.session?.round_id;
+      syncButton.hidden = completed === 0 || uploaded || !state.session?.round_id;
       syncButton.disabled = state.syncingTraining || wrongUser;
       syncButton.textContent = user ? "上传训练记录" : "登录后上传";
-      note.textContent = !state.session?.round_id ? "旧的本地记录缺少起止时间，无法补传；请重新开始一轮训练。"
+      note.textContent = completed === 0 ? "未做完的次数不计入记录，可以重新开始一轮。" : !state.session?.round_id ? "旧的本地记录缺少起止时间，无法补传；请重新开始一轮训练。"
         : wrongUser ? "此轮训练属于开始时登录的账号，请切回该账号后上传。"
         : uploaded ? "可在下方查看本轮起止时间和次数；训练不影响每日打卡和积分。"
         : error || "登录后上传起止时间与次数；每轮需在一小时内完成，并在结束后五分钟内提交。";
@@ -638,12 +648,23 @@ function renderResult() {
       button.hidden = false;
       button.disabled = !status?.oauth_ready;
       button.textContent = status?.oauth_ready ? "LINUX DO 登录参与排名" : "登录暂未配置";
-      note.textContent = "访客练习不会进入练习次数榜；页面不会保存你的身份信息。";
+      note.textContent = "访客操作不会生成正式打卡记录或积分。";
     }
 
     renderLeaderboard();
-    renderPracticeLeaderboard();
   });
+}
+
+function practicePhase() {
+  const duration = state.session.interval_seconds * 1000;
+  const startsAt = state.readyAt - duration;
+  const liftEnd = startsAt + duration * (state.session.lift_end ?? 45) / 100;
+  const relaxEnd = startsAt + duration * (state.session.relax_end ?? 85) / 100;
+  const now = Date.now();
+  const names = state.session.phase_names ?? ["提～", "放松", "休息"];
+  if (now < liftEnd) return { index: 0, text: names[0], startsAt, endsAt: liftEnd };
+  if (now < relaxEnd) return { index: 1, text: names[1], startsAt: liftEnd, endsAt: relaxEnd };
+  return { index: 2, text: names[2], startsAt: relaxEnd, endsAt: state.readyAt };
 }
 
 function exercisePrompt() {
@@ -664,15 +685,17 @@ function ensureProgress() {
 }
 
 function renderHint() {
+  clearTimeout(phasePromptTimer);
   if (!state.started || isCompletedView()) return;
   const remaining = Math.max(0, Math.ceil((state.readyAt - Date.now()) / 1000));
+  const phase = practicePage && state.session && remaining > 0 ? practicePhase() : null;
   const stage = $("#stage");
   let hintText;
 
   if (state.busy) hintText = "正在记录，请稍候…";
   else if (state.autoPaused) hintText = "自动练习已停止，可用下方按钮继续";
   else if (!state.session) hintText = preferences().mode === "auto" ? "点击页面或按任意键，开始自动练习" : "点击页面或按任意键，开始第 1 次";
-  else if (remaining > 0) hintText = "轻轻收紧，缓慢放松 · 本次还剩 ";
+  else if (remaining > 0) hintText = phase ? `第 ${state.step + 1} 次 · ${phase.text} · 本次还剩 ` : "轻轻收紧，缓慢放松 · 本次还剩 ";
   else if (isAutoSession() && state.step < repetitionCount() - 1) hintText = "正在自动进入下一次…";
   else if (state.step < repetitionCount() - 1) hintText = `点击页面或按任意键，开始第 ${state.step + 2} 次`;
   else hintText = `${repetitionCount()} 次完成，正在确认记录…`;
@@ -688,8 +711,11 @@ function renderHint() {
   stage.setAttribute("aria-label", `${waiting ? "正在进行" : "开始"}第 ${actionNumber} 次练习，${waiting ? "等待倒计时" : "点击开始"}`);
   const seconds = Number(state.session?.interval_seconds ?? state.session?.min_seconds ?? state.status?.min_step_seconds) || 2;
   const prompt = $("#prompt");
-  if (isAutoSession()) {
-    renderAutoPrompt(prompt, exercisePrompt());
+  if (phase) {
+    renderAutoPrompt(prompt, phase.text, phase);
+    phasePromptTimer = setTimeout(renderHint, Math.max(1, Math.ceil(phase.endsAt - Date.now())));
+  } else if (isAutoSession()) {
+    if (!practicePage) renderAutoPrompt(prompt, exercisePrompt());
   } else {
     stopAutoPrompt(prompt);
     prompt.style.setProperty("--prompt-fade-duration", `${seconds / 2}s`);
@@ -728,10 +754,16 @@ function render() {
     stopButton.hidden = !(isAutoSession() && !sessionCompleted());
     stopButton.textContent = state.autoPaused ? "继续自动练习" : "停止自动练习";
   }
+  const abandonButton = $("#abandonRoundButton");
+  if (abandonButton) {
+    abandonButton.hidden = !state.session || sessionCompleted();
+    abandonButton.disabled = state.busy;
+  }
   renderHint();
   renderResult();
   if (practicePage) {
-    renderPracticeLeaderboard();
+    renderPracticeLeaderboard("#practiceLeaderboardList", "#practiceLeaderboardTotal", state.training?.leaderboard || []);
+    renderPracticeLeaderboard("#totalPracticeLeaderboardList", "#totalPracticeLeaderboardTotal", state.training?.total_leaderboard || [], true);
     renderTrainingRecords();
   }
 }
@@ -894,6 +926,15 @@ $("#autoStopButton")?.addEventListener("click", () => {
   if (!isAutoSession() || sessionCompleted()) return;
   state.autoPaused = !state.autoPaused;
   render();
+});
+
+$("#abandonRoundButton")?.addEventListener("click", () => {
+  if (!practicePage || state.busy || !state.session || sessionCompleted()) return;
+  applySession(localPractice.complete(state.session.token, true).session);
+  state.autoPaused = false;
+  applyStatus(localPractice.status());
+  render();
+  void refreshTraining(true);
 });
 
 $("#accountButton").addEventListener("click", () => {

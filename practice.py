@@ -49,27 +49,25 @@ def init_schema(connection: sqlite3.Connection) -> None:
         connection.execute("ALTER TABLE practice_triggers ADD COLUMN repetitions INTEGER NOT NULL DEFAULT 3")
     connection.execute("CREATE INDEX IF NOT EXISTS practice_day ON practice_triggers(day,id)")
 
-    connection.execute("""CREATE TABLE IF NOT EXISTS practice_completions (
-        id INTEGER PRIMARY KEY, day TEXT NOT NULL, user_id TEXT NOT NULL,
-        username TEXT NOT NULL, flow_id TEXT NOT NULL UNIQUE,
-        repetitions INTEGER NOT NULL CHECK(repetitions > 0), completed_at REAL NOT NULL
-    )""")
-    connection.execute("CREATE INDEX IF NOT EXISTS practice_completions_day ON practice_completions(day,user_id)")
-    connection.execute("""INSERT OR IGNORE INTO practice_completions(
-            day,user_id,username,flow_id,repetitions,completed_at)
-        SELECT day,user_id,username,flow_id,3,completed_at FROM entries
-        WHERE flow_id IS NOT NULL AND flow_id != ''""")
+    connection.execute("DROP TABLE IF EXISTS practice_completions")
 
+    training_schema = connection.execute("SELECT sql FROM sqlite_master WHERE name='training_records'").fetchone()
+    migrate_training = bool(training_schema and "BETWEEN 2 AND 5" in training_schema["sql"])
+    if migrate_training:
+        connection.execute("ALTER TABLE training_records RENAME TO training_records_legacy")
     connection.execute("""CREATE TABLE IF NOT EXISTS training_records (
         id INTEGER PRIMARY KEY, user_id TEXT NOT NULL, username TEXT NOT NULL,
         day TEXT NOT NULL, round_id TEXT NOT NULL,
         started_at INTEGER NOT NULL, ended_at INTEGER NOT NULL,
         repetitions INTEGER NOT NULL CHECK(repetitions BETWEEN 1 AND 20),
-        interval_seconds INTEGER NOT NULL CHECK(interval_seconds BETWEEN 2 AND 5),
+        interval_seconds INTEGER NOT NULL CHECK(interval_seconds BETWEEN 2 AND 10),
         mode TEXT NOT NULL CHECK(mode IN ('manual','auto')),
         received_at INTEGER NOT NULL,
         UNIQUE(user_id,round_id), CHECK(started_at < ended_at)
     )""")
+    if migrate_training:
+        connection.execute("INSERT INTO training_records SELECT * FROM training_records_legacy")
+        connection.execute("DROP TABLE training_records_legacy")
     connection.execute("CREATE INDEX IF NOT EXISTS training_records_day ON training_records(day,received_at,user_id)")
     connection.execute("CREATE INDEX IF NOT EXISTS training_records_user_time ON training_records(user_id,started_at,ended_at)")
     connection.execute("CREATE INDEX IF NOT EXISTS training_records_user_latest ON training_records(user_id,received_at DESC,id DESC)")
@@ -83,27 +81,32 @@ def training_record_view(row) -> dict:
     return {field: row[field] for field in _TRAINING_FIELDS}
 
 
-def training_data(connection: sqlite3.Connection, user: dict | None, day: str) -> dict:
-    leaderboard = [dict(row) for row in connection.execute("""
+def _training_leaderboard(connection: sqlite3.Connection, day: str | None) -> list[dict]:
+    day_filter = "AND t.day=?" if day is not None else ""
+    return [dict(row) for row in connection.execute(f"""
         WITH totals AS (
             SELECT t.user_id,MAX(t.username) AS username,SUM(t.repetitions) AS count,
                    MIN(t.received_at) AS first_received
             FROM training_records t
             LEFT JOIN reviews r ON r.day=t.day AND r.user_id=t.user_id
-            WHERE t.day=? AND (r.user_id IS NULL OR r.approved=1)
+            WHERE (r.user_id IS NULL OR r.approved=1) {day_filter}
             GROUP BY t.user_id
         )
         SELECT ROW_NUMBER() OVER (ORDER BY count DESC,first_received,user_id) AS rank,
                username,count
         FROM totals ORDER BY rank LIMIT 50
-    """, (day,))]
+    """, (day,) if day is not None else ())]
+
+
+def training_data(connection: sqlite3.Connection, user: dict | None, day: str) -> dict:
     records = [] if user is None else [
         training_record_view(row) for row in connection.execute(
             "SELECT * FROM training_records WHERE user_id=? ORDER BY received_at DESC,id DESC LIMIT 50",
             (user["id"],),
         )
     ]
-    return {"leaderboard": leaderboard, "records": records}
+    return {"leaderboard": _training_leaderboard(connection, day),
+            "total_leaderboard": _training_leaderboard(connection, None), "records": records}
 
 
 def _training_payload(body: dict) -> dict:
@@ -115,8 +118,8 @@ def _training_payload(body: dict) -> dict:
         raise PracticeError("训练起止时间须为 Unix 毫秒整数", 400)
     if type(values["repetitions"]) is not int or not 1 <= values["repetitions"] <= 20:
         raise PracticeError("训练次数须为 1–20 的整数", 400)
-    if type(values["interval_seconds"]) is not int or not 2 <= values["interval_seconds"] <= 5:
-        raise PracticeError("训练间隔须为 2–5 的整数秒", 400)
+    if type(values["interval_seconds"]) is not int or not 2 <= values["interval_seconds"] <= 10:
+        raise PracticeError("每次训练时长须为 2–10 的整数秒", 400)
     mode = body.get("mode")
     if not isinstance(mode, str) or mode not in {"manual", "auto"}:
         raise PracticeError("训练模式须为 manual 或 auto", 400)

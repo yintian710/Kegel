@@ -399,18 +399,6 @@ def status_view(connection, user: dict | None, now: float, subject: str = "") ->
     review = connection.execute("SELECT reason,approved FROM reviews WHERE day=? AND user_id=? AND approved=0", (day["day"], identity)).fetchone()
     if session and not session["eligible"] and user and day["opened_at"] is not None and not review:
         session = None
-    practice_leaderboard = [dict(row) for row in connection.execute("""
-        WITH totals AS (
-            SELECT p.user_id,MAX(p.username) AS username,SUM(p.repetitions) AS count,
-                   MIN(p.completed_at) AS first_completed
-            FROM practice_completions p
-            LEFT JOIN reviews r ON r.day=p.day AND r.user_id=p.user_id
-            WHERE p.day=? AND (r.user_id IS NULL OR r.approved=1)
-            GROUP BY p.user_id
-        )
-        SELECT ROW_NUMBER() OVER (ORDER BY count DESC,first_completed,user_id) AS rank,username,count
-        FROM totals ORDER BY rank LIMIT 50
-    """, (day["day"],))]
     return {"ok": True, "user": user, "day": day["day"], "is_open": day["opened_at"] is not None,
             "opened_at": iso_time(day["opened_at"]), "open_reason": day["open_reason"],
             "deadline": config["deadline"], "timezone": "Asia/Shanghai", "min_step_seconds": config["min_step_seconds"],
@@ -419,8 +407,7 @@ def status_view(connection, user: dict | None, now: float, subject: str = "") ->
             "oauth_ready": bool(os.environ.get("LINUXDO_CLIENT_ID") and os.environ.get("LINUXDO_CLIENT_SECRET")),
             "total": connection.execute("SELECT COUNT(*) FROM entries WHERE day=?", (day["day"],)).fetchone()[0],
             "entry": entry_view(entry), "session": session_view(session, now), "review": dict(review) if review else None,
-            "leaderboard": [dict(row) for row in connection.execute("SELECT rank,username,amount,reward_status FROM entries WHERE day=? ORDER BY rank LIMIT 50", (day["day"],))],
-            "practice_leaderboard": practice_leaderboard}
+            "leaderboard": [dict(row) for row in connection.execute("SELECT rank,username,amount,reward_status FROM entries WHERE day=? ORDER BY rank LIMIT 50", (day["day"],))]}
 
 
 def practice_api_view(connection, user: dict | None, today: str) -> dict:
@@ -910,10 +897,6 @@ class AppHandler(SimpleHTTPRequestHandler):
             entry = None
             if user:
                 completed_at = row["updated_at"]
-                connection.execute("""INSERT OR IGNORE INTO practice_completions(
-                        day,user_id,username,flow_id,repetitions,completed_at)
-                    VALUES (?,?,?,?,?,?)""",
-                    (today, user["id"], user["username"], row["flow_id"], row["repetitions"], completed_at))
                 review = connection.execute(
                     "SELECT 1 FROM reviews WHERE day=? AND user_id=? AND approved=0", (today, user["id"])
                 ).fetchone()
