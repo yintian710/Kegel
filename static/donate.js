@@ -123,11 +123,9 @@ function renderMyOrders(orders = []) {
 }
 
 function render() {
-  const { user, oauth_ready, donation_ready, donation_leaderboard = [], donation_orders = [] } = state.data;
+  const { donation_ready, donation_leaderboard = [], donation_orders = [] } = state.data;
 
-  const btn = $("#accountButton");
-  btn.textContent = user ? `@${user.username} · 退出` : oauth_ready ? "LINUX DO 登录" : "登录暂未配置";
-  btn.disabled = !user && !oauth_ready;
+  window.SiteNavigation.update(state.data);
 
   const badge = $("#donateStatusBadge");
   if (!donation_ready) {
@@ -173,9 +171,6 @@ function submitPayment(payment) {
   }
 }
 
-function login() {
-  window.location.assign("/auth/linuxdo/start?next=/donate");
-}
 
 async function refresh() {
   if (state.loading) return;
@@ -224,7 +219,7 @@ $("#donationForm").addEventListener("submit", async (event) => {
   event.preventDefault();
   if (state.creating || !$("#donationForm").reportValidity()) return;
   if (!state.data?.user) {
-    login();
+    window.SiteNavigation.login();
     return;
   }
 
@@ -242,7 +237,7 @@ $("#donationForm").addEventListener("submit", async (event) => {
       body: JSON.stringify({ amount }),
     });
     if (response.status === 401) {
-      login();
+      window.SiteNavigation.login();
       return;
     }
     const data = await response.json().catch(() => { throw new Error("服务器响应格式不正确"); });
@@ -259,10 +254,6 @@ $("#donationForm").addEventListener("submit", async (event) => {
   }
 });
 
-$("#accountButton").addEventListener("click", () => {
-  if (state.data?.user) window.location.assign("/auth/logout");
-  else login();
-});
 
 $("#refreshBoardBtn").addEventListener("click", () => { void refresh(); });
 document.addEventListener("visibilitychange", () => {

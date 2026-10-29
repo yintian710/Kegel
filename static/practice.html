@@ -9,21 +9,11 @@
     <title>提肛练习</title>
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <link rel="stylesheet" href="/styles.css" />
+    <script src="/navigation.js" defer></script>
     <script src="/app.js" defer></script>
   </head>
   <body class="stage-wrap practice-page" data-page="practice" data-step="0">
-    <header id="topbar" class="site-header">
-      <a class="site-brand" href="/" data-interactive>
-        <img class="brand-logo" src="/img/icon-48.png" alt="提肛打卡 Logo" />
-        <span>提肛打卡</span><span class="brand-badge">DAILY</span>
-      </a>
-      <nav class="site-nav">
-        <a class="nav-link" href="/" data-interactive>首页</a>
-        <a class="nav-link active" href="/practice" data-interactive>提肛练习</a>
-        <a id="walletLink" class="nav-link" href="/shop" data-interactive>商店</a>
-        <button id="accountButton" class="user-btn" type="button" data-interactive>LINUX DO 登录</button>
-      </nav>
-    </header>
+    <header id="topbar" class="site-header" data-site-navigation></header>
     <main class="practice-layout">
       <div class="practice-main-column">
       <section id="stage" class="stage-main" tabindex="0" role="button" aria-label="开始第 1 次练习">

@@ -51,7 +51,7 @@ function showLogin() {
 
 function setBusy(value) {
   state.busy = value;
-  document.querySelectorAll("button").forEach((btn) => { btn.disabled = value; });
+  document.querySelectorAll("#loginPanel button, #dashboard button, dialog button").forEach((btn) => { btn.disabled = value; });
   if (!value && state.data) {
     $("#openButton").disabled = state.data.status.is_open;
     document.querySelectorAll("[data-admin-credit]").forEach((btn) => {
@@ -382,6 +382,7 @@ function openConfirmation(action) {
 
 async function refresh() {
   state.data = await api();
+  window.SiteNavigation.update(state.data.status);
   render();
 }
 
@@ -641,6 +642,8 @@ $("#confirmationForm").addEventListener("submit", async (event) => {
     setBusy(false);
   }
 });
+
+void api("/api/status").then(window.SiteNavigation.update).catch((error) => notify(error.message));
 
 (async () => {
   try { state.token = sessionStorage.getItem(tokenKey) || ""; } catch {}

@@ -12,23 +12,11 @@
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <link rel="apple-touch-icon" sizes="180x180" href="/img/icon-180.png" />
     <link rel="stylesheet" href="/styles.css" />
+    <script src="/navigation.js" defer></script>
     <script src="/donate.js" defer></script>
   </head>
   <body>
-    <header class="site-header">
-      <a class="site-brand" href="/">
-        <img class="brand-logo" src="/img/icon-48.png" alt="提肛打卡 Logo" />
-        <span>提肛打卡</span>
-        <span class="brand-badge">DAILY</span>
-      </a>
-      <nav class="site-nav">
-        <a class="nav-link" href="/">首页</a>
-        <a class="nav-link" href="/shop">商店</a>
-        <a class="nav-link active" href="/donate">赞助</a>
-        <a class="nav-link" href="/admin">管理</a>
-        <button id="accountButton" class="user-btn" type="button" disabled>正在加载账户…</button>
-      </nav>
-    </header>
+    <header id="topbar" class="site-header" data-site-navigation></header>
 
     <main class="page-wrap" id="donateMain">
       <div class="page-hero">

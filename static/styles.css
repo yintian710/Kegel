@@ -70,6 +70,13 @@ button:disabled {
 
 /* Shared Header */
 .site-header {
+  width: 100%;
+  flex-shrink: 0;
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  background: rgba(248, 250, 252, 0.92);
+  backdrop-filter: blur(10px);
   max-width: 1200px;
   margin: 0 auto;
   padding: 20px 24px;
@@ -106,10 +113,12 @@ button:disabled {
 }
 .site-nav {
   display: flex;
+  min-width: 0;
   align-items: center;
   gap: 8px;
 }
 .nav-link {
+  flex-shrink: 0;
   font-size: 14px;
   font-weight: 500;
   color: var(--text-muted);
@@ -682,13 +691,15 @@ button:disabled {
 /* ==========================================================
    4. ADMIN BACKEND (Image 4 style)
    ========================================================== */
+.admin-page {
+  height: 100svh;
+  overflow: hidden;
+}
 .admin-shell {
   display: flex;
-  position: fixed;
-  inset: 0;
-  width: 100vw;
-  height: 100vh;
-  height: 100svh;
+  flex: 1;
+  min-height: 0;
+  width: 100%;
   overflow: hidden;
   background: var(--bg);
 }
@@ -1078,14 +1089,6 @@ html.practice-page-root,
 html.practice-page-root body {
   overflow-x: clip;
 }
-.practice-page .site-header {
-  width: 100%;
-  position: sticky;
-  top: 0;
-  z-index: 100;
-  background: rgba(248, 250, 252, 0.92);
-  backdrop-filter: blur(10px);
-}
 .practice-layout {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 350px;
@@ -1164,6 +1167,11 @@ html.practice-page-root body {
 .phase-timeline input::-webkit-slider-thumb { appearance: none; width: 18px; height: 28px; border: 2px solid var(--primary); border-radius: 6px; background: var(--bg-card); cursor: ew-resize; pointer-events: auto; }
 .phase-timeline input::-moz-range-thumb { width: 14px; height: 24px; border: 2px solid var(--primary); border-radius: 6px; background: var(--bg-card); cursor: ew-resize; pointer-events: auto; }
 .phase-timeline input:focus-visible { outline: 2px solid var(--primary); outline-offset: 4px; border-radius: 6px; }
+.phase-handles-overlap { margin-bottom: 8px; }
+.phase-handles-overlap #preferenceLiftEnd::-webkit-slider-thumb { transform: translateY(-8px); }
+.phase-handles-overlap #preferenceRelaxEnd::-webkit-slider-thumb { transform: translateY(8px); }
+.phase-handles-overlap #preferenceLiftEnd::-moz-range-thumb { transform: translateY(-8px); }
+.phase-handles-overlap #preferenceRelaxEnd::-moz-range-thumb { transform: translateY(8px); }
 .phase-axis { display: flex; justify-content: space-between; margin: 0 9px; color: var(--text-muted); font-size: 11px; }
 .phase-axis span::before { content: ""; display: block; height: 5px; border-left: 1px solid var(--border); margin-bottom: 4px; }
 .phase-labels { display: flex; flex-wrap: wrap; gap: 8px 12px; font-size: 12px; margin-top: 12px; color: var(--text-muted); }
@@ -1264,6 +1272,10 @@ html.practice-page-root body {
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
   }
+  .admin-page {
+    height: auto;
+    overflow: visible;
+  }
   .admin-shell {
     position: static;
     flex-direction: column;
@@ -1276,9 +1288,7 @@ html.practice-page-root body {
     border-right: none;
     border-bottom: 1px solid var(--border);
     padding: 16px;
-    position: sticky;
-    top: 0;
-    z-index: 50;
+    position: static;
   }
   .admin-sidebar-brand {
     padding: 0 0 12px;

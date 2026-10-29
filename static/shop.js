@@ -274,11 +274,9 @@ function renderLedger(ledger = []) {
 }
 
 function render() {
-  const { user, oauth_ready, wallet, quota, products = [], purchases = [], ledger = [] } = state.data;
+  const { user, wallet, quota, products = [], purchases = [], ledger = [] } = state.data;
 
-  const btn = $("#accountButton");
-  btn.textContent = user ? `@${user.username} · 退出` : oauth_ready ? "LINUX DO 登录" : "登录暂未配置";
-  btn.disabled = !user && !oauth_ready;
+  window.SiteNavigation.update(state.data);
 
   $("#walletBalance").textContent = user && wallet ? Number(wallet.balance).toLocaleString() : "—";
   $("#walletNote").textContent = user
@@ -380,11 +378,6 @@ async function refresh() {
   }
 }
 
-$("#accountButton").addEventListener("click", () => {
-  if (state.data?.user) window.location.assign("/auth/logout");
-  else if (state.data && !state.data.oauth_ready) notify("LINUX DO 登录暂未配置。");
-  else window.location.assign("/auth/linuxdo/start?next=/shop");
-});
 
 $("#refreshButton").addEventListener("click", () => { void refresh(); });
 document.addEventListener("visibilitychange", () => { if (!document.hidden) void refresh(); });

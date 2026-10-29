@@ -12,24 +12,11 @@
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <link rel="apple-touch-icon" sizes="180x180" href="/img/icon-180.png" />
     <link rel="stylesheet" href="/styles.css" />
+    <script src="/navigation.js" defer></script>
     <script src="/app.js" defer></script>
   </head>
   <body class="stage-wrap" data-step="0">
-    <header id="topbar" class="site-header" hidden>
-      <a class="site-brand" href="/" data-interactive>
-        <img class="brand-logo" src="/img/icon-48.png" alt="提肛打卡 Logo" />
-        <span>提肛打卡</span>
-        <span class="brand-badge">DAILY</span>
-      </a>
-      <nav class="site-nav">
-        <a class="nav-link active" href="/" data-interactive>首页</a>
-        <a class="nav-link" href="/practice" data-interactive>提肛练习</a>
-        <a id="walletLink" class="nav-link" href="/shop" data-interactive>商店</a>
-        <a class="nav-link" href="/donate" data-interactive>赞助</a>
-        <a class="nav-link" href="/admin" data-interactive>管理</a>
-        <button id="accountButton" class="user-btn" type="button" data-interactive>LINUX DO 登录</button>
-      </nav>
-    </header>
+    <header id="topbar" class="site-header" data-site-navigation></header>
 
     <main id="stage" class="stage-main" tabindex="0" role="button" aria-label="开始今日提肛打卡">
       <div id="stageContent" class="stage-content">

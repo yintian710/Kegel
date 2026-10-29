@@ -299,6 +299,7 @@ function showHomeCompletion() {
 function applyStatus(status) {
   const previousDay = state.status?.day;
   state.status = status;
+  if (!practicePage) window.SiteNavigation.update(status);
   if (!practicePage && status.session && (status.session.mode !== "manual" || status.session.repetitions !== 3)) status.session = null;
   if (previousDay && previousDay !== status.day) {
     state.entry = null;
@@ -727,17 +728,13 @@ function renderHint() {
 function render() {
   if (!state.started) return;
   const status = state.status;
-  $("#topbar").hidden = false;
   $("#footer").hidden = false;
   $("#progress").hidden = isCompletedView() || !state.session;
   document.body.dataset.step = String(state.step);
   ensureProgress();
   document.querySelectorAll("#progress span").forEach((dot, index) => dot.classList.toggle("active", index <= state.step));
 
-  const user = (practicePage ? state.training : status)?.user;
-  $("#accountButton").textContent = user ? `@${user.username} · 退出` : "LINUX DO 登录";
-  $("#accountButton").hidden = false;
-  $("#walletLink").textContent = status?.wallet ? `商店 (${status.wallet.balance})` : "商店";
+  if (practicePage) window.SiteNavigation.update(state.training);
   if (practicePage) {
     $("#openingNote").textContent = "训练在本地计时；登录后上传起止时间与次数，独立统计，不影响每日打卡。";
   } else if (status) {
@@ -869,13 +866,9 @@ async function advance() {
   }
 }
 
-function login() {
-  if (!(practicePage ? state.training : state.status)?.oauth_ready) return notify("LINUX DO 登录暂未配置，请稍后再来。");
-  window.location.assign(`/auth/linuxdo/start?next=${practicePage ? "/practice" : "/"}`);
-}
 
 $("#claimButton").addEventListener("click", async () => {
-  if (!state.entry) return login();
+  if (!state.entry) return window.SiteNavigation.login();
   if (state.busy || state.entry.reward_status !== "unclaimed") return;
   state.busy = true;
   render();
@@ -897,7 +890,7 @@ $("#claimButton").addEventListener("click", async () => {
 
 $("#syncPracticeButton")?.addEventListener("click", async () => {
   await refreshTraining();
-  if (!state.training?.user) return login();
+  if (!state.training?.user) return window.SiteNavigation.login();
   await syncTraining(true);
 });
 
@@ -937,10 +930,6 @@ $("#abandonRoundButton")?.addEventListener("click", () => {
   void refreshTraining(true);
 });
 
-$("#accountButton").addEventListener("click", () => {
-  if ((practicePage ? state.training : state.status)?.user) window.location.assign("/auth/logout");
-  else login();
-});
 
 const interactive = "a, button, input, textarea, select, summary, [contenteditable], [data-interactive], #notice";
 $("#stage").addEventListener("click", (event) => {

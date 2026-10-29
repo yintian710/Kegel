@@ -44,13 +44,13 @@
   }
 
   function normalize(candidate) {
+    const liftEnd = integerInRange(candidate?.liftEnd, 0, 100, DEFAULTS.liftEnd);
     return {
       mode: candidate?.mode === "auto" ? "auto" : candidate?.mode === "manual" ? "manual" : DEFAULTS.mode,
       repetitions: integerInRange(candidate?.repetitions, 1, 20, DEFAULTS.repetitions),
       intervalSeconds: integerInRange(candidate?.intervalSeconds, 2, 10, DEFAULTS.intervalSeconds),
-      liftEnd: integerInRange(candidate?.liftEnd, 1, 98, DEFAULTS.liftEnd),
-      relaxEnd: integerInRange(candidate?.relaxEnd, integerInRange(candidate?.liftEnd, 1, 98, DEFAULTS.liftEnd) + 1, 99,
-        Math.max(DEFAULTS.relaxEnd, integerInRange(candidate?.liftEnd, 1, 98, DEFAULTS.liftEnd) + 1)),
+      liftEnd,
+      relaxEnd: integerInRange(candidate?.relaxEnd, liftEnd, 100, Math.max(DEFAULTS.relaxEnd, liftEnd)),
       phaseNames: DEFAULTS.phaseNames.map((fallback, index) => cleanName(candidate?.phaseNames?.[index]) || fallback),
       hideTigang: candidate?.hideTigang === true,
       exerciseName: cleanName(candidate?.exerciseName),
@@ -259,7 +259,7 @@
           </div>
           <fieldset class="phase-settings">
             <legend>阶段分配</legend>
-            <p class="preference-note">拖动两个分界点，按 1% 调整；新设置从下一轮生效。</p>
+            <p class="preference-note">拖动两个分界点，按 1% 调整；设为 0% 可取消该阶段，新设置从下一轮生效。</p>
             <div id="phaseTimeline" class="phase-timeline">
               <div class="phase-track"><span></span><span></span><span></span></div>
               <input id="preferenceLiftEnd" type="range" min="0" max="100" step="1" aria-label="提～结束位置" />
@@ -286,8 +286,8 @@
     }
 
     const change = (event) => {
-      if (event?.target.id === "preferenceLiftEnd") event.target.value = String(Math.max(1, Math.min(preferences.relaxEnd - 1, Number(event.target.value))));
-      if (event?.target.id === "preferenceRelaxEnd") event.target.value = String(Math.min(99, Math.max(preferences.liftEnd + 1, Number(event.target.value))));
+      if (event?.target.id === "preferenceLiftEnd") event.target.value = String(Math.max(0, Math.min(preferences.relaxEnd, Number(event.target.value))));
+      if (event?.target.id === "preferenceRelaxEnd") event.target.value = String(Math.min(100, Math.max(preferences.liftEnd, Number(event.target.value))));
       if (mount) validatePracticeInputs();
       const repetitions = document.getElementById("preferenceRepetitions");
       const interval = document.getElementById("preferenceInterval");
@@ -337,10 +337,10 @@
       interval.disabled = false;
       const lift = document.getElementById("preferenceLiftEnd");
       const relax = document.getElementById("preferenceRelaxEnd");
-      lift.setAttribute("aria-valuemin", "1");
-      lift.setAttribute("aria-valuemax", String(preferences.relaxEnd - 1));
-      relax.setAttribute("aria-valuemin", String(preferences.liftEnd + 1));
-      relax.setAttribute("aria-valuemax", "99");
+      lift.setAttribute("aria-valuemin", "0");
+      lift.setAttribute("aria-valuemax", String(preferences.relaxEnd));
+      relax.setAttribute("aria-valuemin", String(preferences.liftEnd));
+      relax.setAttribute("aria-valuemax", "100");
       lift.value = String(preferences.liftEnd);
       relax.value = String(preferences.relaxEnd);
       preferences.phaseNames.forEach((name, index) => {
@@ -354,6 +354,7 @@
       const timeline = document.getElementById("phaseTimeline");
       timeline.style.setProperty("--lift-end", `${preferences.liftEnd}%`);
       timeline.style.setProperty("--relax-end", `${preferences.relaxEnd}%`);
+      timeline.classList.toggle("phase-handles-overlap", preferences.liftEnd === preferences.relaxEnd);
       document.getElementById("phaseAxis").replaceChildren(...Array.from({ length: 6 }, (_, index) => {
         const tick = document.createElement("span");
         tick.textContent = `${Number((seconds * index / 5).toFixed(1))}s`;
@@ -361,10 +362,10 @@
       }));
       document.getElementById("phaseLabels").replaceChildren(...[ [preferences.phaseNames[0], preferences.liftEnd], [preferences.phaseNames[1], preferences.relaxEnd - preferences.liftEnd], [preferences.phaseNames[2], 100 - preferences.relaxEnd] ].map(([label, percent]) => {
         const item = document.createElement("span");
-        item.textContent = `${label} ${percent}% · ${(seconds * percent / 100).toFixed(2)}s`;
+        item.textContent = `${label} ${percent}% · ${(seconds * percent / 100).toFixed(2)}s${percent === 0 ? "（已取消）" : ""}`;
         return item;
       }));
-      const phases = preferences.phaseNames.join("、");
+      const phases = preferences.phaseNames.filter((_, index) => [preferences.liftEnd, preferences.relaxEnd - preferences.liftEnd, 100 - preferences.relaxEnd][index] > 0).join("、");
       document.getElementById("preferenceModeNote").textContent = preferences.mode === "auto"
         ? `自动模式按所选时长依次${phases}，连续完成本轮。`
         : `手动模式每次依次${phases}，结束后点击开始下一次。`;
