@@ -7,6 +7,9 @@
     mode: "auto",
     repetitions: 10,
     intervalSeconds: 3,
+    liftEnd: 45,
+    relaxEnd: 85,
+    phaseNames: Object.freeze(["提～", "放松", "休息"]),
     hideTigang: false,
     exerciseName: "",
     notifyHour: false,
@@ -44,7 +47,11 @@
     return {
       mode: candidate?.mode === "auto" ? "auto" : candidate?.mode === "manual" ? "manual" : DEFAULTS.mode,
       repetitions: integerInRange(candidate?.repetitions, 1, 20, DEFAULTS.repetitions),
-      intervalSeconds: integerInRange(candidate?.intervalSeconds, 2, 5, DEFAULTS.intervalSeconds),
+      intervalSeconds: integerInRange(candidate?.intervalSeconds, 2, 10, DEFAULTS.intervalSeconds),
+      liftEnd: integerInRange(candidate?.liftEnd, 1, 98, DEFAULTS.liftEnd),
+      relaxEnd: integerInRange(candidate?.relaxEnd, integerInRange(candidate?.liftEnd, 1, 98, DEFAULTS.liftEnd) + 1, 99,
+        Math.max(DEFAULTS.relaxEnd, integerInRange(candidate?.liftEnd, 1, 98, DEFAULTS.liftEnd) + 1)),
+      phaseNames: DEFAULTS.phaseNames.map((fallback, index) => cleanName(candidate?.phaseNames?.[index]) || fallback),
       hideTigang: candidate?.hideTigang === true,
       exerciseName: cleanName(candidate?.exerciseName),
       notifyHour: candidate?.notifyHour === true,
@@ -179,14 +186,13 @@
     const repetitions = document.getElementById("preferenceRepetitions");
     if (!repetitions) return true;
     const interval = document.getElementById("preferenceInterval");
-    const auto = document.getElementById("preferenceModeAuto").checked;
     const count = repetitions.valueAsNumber;
     const seconds = interval.valueAsNumber;
     const errors = [
       [repetitions, "preferenceRepetitionsError", count > 20 ? "最高 20 次" :
         Number.isInteger(count) && count >= 1 ? "" : "请输入 1–20 次的整数"],
-      [interval, "preferenceIntervalError", !auto || (Number.isInteger(seconds) && seconds >= 2 && seconds <= 5)
-        ? "" : "间隔需为 2–5 秒的整数"],
+      [interval, "preferenceIntervalError", Number.isInteger(seconds) && seconds >= 2 && seconds <= 10
+        ? "" : "时长需为 2–10 秒的整数"],
     ];
     for (const [input, errorId, message] of errors) {
       const error = document.getElementById(errorId);
@@ -246,17 +252,42 @@
               <input id="preferenceRepetitions" class="input-text" type="number" inputmode="numeric" min="1" max="20" step="1" aria-describedby="preferenceRepetitionsError" />
               <span id="preferenceRepetitionsError" class="preference-error" role="alert" hidden></span>
             </label>
-            <label class="preference-field">间隔秒数（2–5 秒）
-              <input id="preferenceInterval" class="input-text" type="number" inputmode="numeric" min="2" max="5" step="1" aria-describedby="preferenceIntervalError" />
+            <label class="preference-field">每次时长（2–10 秒）
+              <input id="preferenceInterval" class="input-text" type="number" inputmode="numeric" min="2" max="10" step="1" aria-describedby="preferenceIntervalError" />
               <span id="preferenceIntervalError" class="preference-error" role="alert" hidden></span>
             </label>
           </div>
+          <fieldset class="phase-settings">
+            <legend>阶段分配</legend>
+            <p class="preference-note">拖动两个分界点，按 1% 调整；新设置从下一轮生效。</p>
+            <div id="phaseTimeline" class="phase-timeline">
+              <div class="phase-track"><span></span><span></span><span></span></div>
+              <input id="preferenceLiftEnd" type="range" min="0" max="100" step="1" aria-label="提～结束位置" />
+              <input id="preferenceRelaxEnd" type="range" min="0" max="100" step="1" aria-label="放松结束位置" />
+            </div>
+            <div id="phaseAxis" class="phase-axis"></div>
+            <div id="phaseLabels" class="phase-labels" aria-live="polite"></div>
+            <div class="phase-name-fields">
+              <label class="preference-field">第一阶段文字
+                <input id="preferencePhaseName0" class="input-text" type="text" maxlength="24" placeholder="提～" autocomplete="off" />
+              </label>
+              <label class="preference-field">第二阶段文字
+                <input id="preferencePhaseName1" class="input-text" type="text" maxlength="24" placeholder="放松" autocomplete="off" />
+              </label>
+              <label class="preference-field">第三阶段文字
+                <input id="preferencePhaseName2" class="input-text" type="text" maxlength="24" placeholder="休息" autocomplete="off" />
+              </label>
+            </div>
+            <p class="preference-note">每段最多 24 字，留空恢复默认文字；从下一轮生效。</p>
+          </fieldset>
           <p id="preferenceModeNote" class="preference-note"></p>
         </div>`;
       mount.append(options);
     }
 
-    const change = () => {
+    const change = (event) => {
+      if (event?.target.id === "preferenceLiftEnd") event.target.value = String(Math.max(1, Math.min(preferences.relaxEnd - 1, Number(event.target.value))));
+      if (event?.target.id === "preferenceRelaxEnd") event.target.value = String(Math.min(99, Math.max(preferences.liftEnd + 1, Number(event.target.value))));
       if (mount) validatePracticeInputs();
       const repetitions = document.getElementById("preferenceRepetitions");
       const interval = document.getElementById("preferenceInterval");
@@ -265,6 +296,9 @@
           mode: document.getElementById("preferenceModeAuto").checked ? "auto" : "manual",
           ...(repetitions.getAttribute("aria-invalid") !== "true" ? { repetitions: repetitions.valueAsNumber } : {}),
           ...(interval.getAttribute("aria-invalid") !== "true" && !interval.disabled ? { intervalSeconds: interval.valueAsNumber } : {}),
+          liftEnd: Number(document.getElementById("preferenceLiftEnd").value),
+          relaxEnd: Number(document.getElementById("preferenceRelaxEnd").value),
+          phaseNames: [0, 1, 2].map((index) => document.getElementById(`preferencePhaseName${index}`).value),
         } : {}),
         hideTigang: document.getElementById("preferenceHide").checked,
         exerciseName: document.getElementById("preferenceName").value,
@@ -275,6 +309,7 @@
     for (const input of panel.querySelectorAll("select, input")) input.addEventListener("change", change);
     for (const input of mount?.querySelectorAll("select, input") || []) input.addEventListener("change", change);
     for (const input of mount?.querySelectorAll('input[type="number"]') || []) input.addEventListener("input", change);
+    for (const input of mount?.querySelectorAll('input[type="range"]') || []) input.addEventListener("input", change);
     document.getElementById("preferenceName").addEventListener("input", change);
     document.getElementById("preferencePermission").addEventListener("click", requestNotificationPermission);
     syncSettings();
@@ -299,10 +334,40 @@
       if (repetitions.getAttribute("aria-invalid") !== "true") repetitions.value = String(preferences.repetitions);
       if (interval.getAttribute("aria-invalid") !== "true") interval.value = String(preferences.intervalSeconds);
       repetitions.disabled = false;
-      interval.disabled = preferences.mode !== "auto";
+      interval.disabled = false;
+      const lift = document.getElementById("preferenceLiftEnd");
+      const relax = document.getElementById("preferenceRelaxEnd");
+      lift.setAttribute("aria-valuemin", "1");
+      lift.setAttribute("aria-valuemax", String(preferences.relaxEnd - 1));
+      relax.setAttribute("aria-valuemin", String(preferences.liftEnd + 1));
+      relax.setAttribute("aria-valuemax", "99");
+      lift.value = String(preferences.liftEnd);
+      relax.value = String(preferences.relaxEnd);
+      preferences.phaseNames.forEach((name, index) => {
+        document.getElementById(`preferencePhaseName${index}`).value = name;
+      });
+      lift.setAttribute("aria-label", `${preferences.phaseNames[0]}结束位置`);
+      relax.setAttribute("aria-label", `${preferences.phaseNames[1]}结束位置`);
+      const seconds = preferences.intervalSeconds;
+      lift.setAttribute("aria-valuetext", `${preferences.liftEnd}%，${(seconds * preferences.liftEnd / 100).toFixed(2)} 秒`);
+      relax.setAttribute("aria-valuetext", `${preferences.relaxEnd}%，${(seconds * preferences.relaxEnd / 100).toFixed(2)} 秒`);
+      const timeline = document.getElementById("phaseTimeline");
+      timeline.style.setProperty("--lift-end", `${preferences.liftEnd}%`);
+      timeline.style.setProperty("--relax-end", `${preferences.relaxEnd}%`);
+      document.getElementById("phaseAxis").replaceChildren(...Array.from({ length: 6 }, (_, index) => {
+        const tick = document.createElement("span");
+        tick.textContent = `${Number((seconds * index / 5).toFixed(1))}s`;
+        return tick;
+      }));
+      document.getElementById("phaseLabels").replaceChildren(...[ [preferences.phaseNames[0], preferences.liftEnd], [preferences.phaseNames[1], preferences.relaxEnd - preferences.liftEnd], [preferences.phaseNames[2], 100 - preferences.relaxEnd] ].map(([label, percent]) => {
+        const item = document.createElement("span");
+        item.textContent = `${label} ${percent}% · ${(seconds * percent / 100).toFixed(2)}s`;
+        return item;
+      }));
+      const phases = preferences.phaseNames.join("、");
       document.getElementById("preferenceModeNote").textContent = preferences.mode === "auto"
-        ? "自动模式会按所选次数和间隔连续进行，无需点击下一次。"
-        : "手动模式按所选次数练习，每次沿用站点设定的原间隔。";
+        ? `自动模式按所选时长依次${phases}，连续完成本轮。`
+        : `手动模式每次依次${phases}，结束后点击开始下一次。`;
     }
     document.getElementById("preferenceHide").checked = preferences.hideTigang;
     document.getElementById("preferenceName").value = preferences.exerciseName;
