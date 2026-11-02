@@ -194,6 +194,8 @@ export interface SaveProductInput {
 }
 export interface SaveProductData { product: Product }
 export type EmptyData = Record<string, never> | null
+export interface ReconcileInput { result: 'success' | 'failed'; trade_no?: string; secondary_secret?: string }
+export interface ReconcileData { order: Purchase }
 
 async function get<T>(url: string, config?: RequestConfig): Promise<T> {
   return (await http.get<T>(url, config)).data
@@ -231,6 +233,7 @@ export const admin = {
   addPoints: (input: AddPointsInput, config?: RequestConfig) => post<AddPointsData>('/admin/points/add', input, config),
   saveProduct: (input: SaveProductInput, config?: RequestConfig) => post<SaveProductData>('/admin/products', input, config),
   archiveProduct: (id: string, config?: RequestConfig) => post<EmptyData>(`/admin/products/${encodeURIComponent(id)}/archive`, {}, config),
+  reconcilePurchase: (orderNo: string, input: ReconcileInput, config?: RequestConfig) => post<ReconcileData>(`/admin/purchases/${encodeURIComponent(orderNo)}/reconcile`, input, config),
 }
 
 const LOGIN_PATHS: Record<string, true> = { '/': true, '/practice': true, '/shop': true, '/donate': true, '/admin': true }

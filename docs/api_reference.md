@@ -307,6 +307,7 @@
 | `/api/admin/review` | POST | `{ "user_id": "123", "approved": true }` | 批准异常访问标记，恢复正常打卡资格 |
 | `/api/admin/products` | POST | `{ "id"?: "1", "category": "LDC", "name": "...", "points_price": 500, "ldc_amount": "1.00", "user_daily_limit": 1, "total_daily_limit": 10, "is_active": true, "secondary_secret": "..." }` | 验证二级密码后新增或编辑商品 |
 | `/api/admin/products/<id>/archive` | POST | `{ "secondary_secret": "..." }` | 验证二级密码后立即下架指定商品 |
+| `/api/admin/purchases/<order_no>/reconcile` | POST | `{ "result": "success" \| "failed", "trade_no"?: "...", "secondary_secret": "..." }` | 人工核对 `uncertain`（待核对）订单：`success` 标为发货成功（扣分保留，可附交易单号）；`failed` 标为失败并退还积分，释放当日额度。仅待核对订单可处理，否则返回 `409`；退款按订单幂等，不会重复退还 |
 | `/api/admin/users?q=<用户名或用户ID>` | GET | 无 | 搜索已有站内记录的数字 ID 用户，用户名不区分 ASCII 大小写、支持部分匹配与 `@` 前缀，ID 精确匹配；最多返回 50 位用户及余额 |
 | `/api/admin/points/add` | POST | `{ "user_id": "123", "amount": 250, "secondary_secret": "输入的二级密码", "request_id": "客户端生成的UUID" }` | 验证管理员身份与二级密码后增加站内积分，返回 `user`、`wallet`、`entry` |
 

@@ -222,3 +222,29 @@ async def purchase_product(user: dict, product_id: Any, request_id: Any) -> dict
                           error[:300], order["order_no"])
         final = await fetch_one("SELECT * FROM shop_purchases WHERE order_no=$1", order["order_no"])
     return {"order": final, "status": status, "trade_no": trade_no, "error": error}
+
+
+async def reconcile(order_no: Any, result: Any, trade_no: Any) -> dict:
+    """Resolve an `uncertain` order by hand: `success` keeps the debit, `failed` refunds it."""
+    if not isinstance(order_no, str) or result not in ("success", "failed"):
+        raise APIError("请选择核对结果")
+    trade = trade_no.strip() if isinstance(trade_no, str) else ""
+    if len(trade) > 128:
+        raise APIError("交易单号过长")
+    now = timeutil.now()
+    async with write_txn():
+        order = await fetch_one("SELECT * FROM shop_purchases WHERE order_no=$1", order_no)
+        if not order:
+            raise APIError("订单不存在", 404)
+        if order["status"] != "uncertain":
+            raise APIError("只有待核对的订单可以处理", 409)
+        if result == "success":
+            await execute("UPDATE shop_purchases SET status='success', trade_no=$1, error='' WHERE order_no=$2",
+                          trade, order_no)
+        else:
+            await credits.refund_points({"id": order["user_id"]}, order["points_cost"], "shop_refund",
+                                        f"refund:{order_no}", now)
+            await execute("UPDATE shop_purchases SET status='failed', error=$1 WHERE order_no=$2",
+                          f"人工核对：未发货，已退还积分（原因：{order['error']}）"[:300], order_no)
+        final = await fetch_one("SELECT * FROM shop_purchases WHERE order_no=$1", order_no)
+    return _purchase_views([final])[0]

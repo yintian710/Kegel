@@ -128,6 +128,40 @@ async def test_uncertain_delivery_keeps_debit_and_quota(client, monkeypatch):
     assert shop["purchases"][0]["status"] == "uncertain"
 
 
+async def test_reconcile_uncertain_order_by_hand(client, monkeypatch):
+    product_id = await make_product(client, "1.00", 100, user_daily_limit=0)
+    for user in (1, 2):
+        await seed_wallet(user)
+
+    async def unknown(*_args):
+        return ("uncertain", "", "请求超时或网络异常: ReadTimeout")
+
+    monkeypatch.setattr(catalog, "dispatch_ldc", unknown)
+    refunded = (await buy(client, 1, product_id))[1]["order"]["order_no"]
+    delivered = (await buy(client, 2, product_id))[1]["order"]["order_no"]
+
+    def reconcile(order_no, body, **kw):
+        return client.request(f"/api/admin/purchases/{order_no}/reconcile", body, **kw)
+
+    # 须为管理员且通过二级密码；结果值必须明确。
+    assert (await reconcile(refunded, {"result": "failed"}, user=1))[0] == 403
+    assert (await reconcile(refunded, {"result": "failed"}, user=ADMIN_USER_ID))[0] == 403
+    assert (await reconcile(refunded, {"result": "maybe"}, admin=True))[0] == 400
+    assert (await reconcile("SO-NOPE", {"result": "failed"}, admin=True))[0] == 404
+
+    code, result = await reconcile(refunded, {"result": "failed"}, admin=True)
+    assert code == 200 and result["order"]["status"] == "failed"
+    wallet = (await client.request("/api/shop", user=1))[1]
+    assert wallet["wallet"]["balance"] == 1000 and wallet["quota"]["used"] == "1.00"  # 只剩另一笔占额度
+    # 已处理的订单不能再次处理，也不会重复退款。
+    assert (await reconcile(refunded, {"result": "failed"}, admin=True))[0] == 409
+    assert (await client.request("/api/shop", user=1))[1]["wallet"]["balance"] == 1000
+
+    code, result = await reconcile(delivered, {"result": "success", "trade_no": " T-MANUAL "}, admin=True)
+    assert code == 200 and result["order"]["status"] == "success" and result["order"]["trade_no"] == "T-MANUAL"
+    assert (await client.request("/api/shop", user=2))[1]["wallet"]["balance"] == 900
+
+
 async def test_pending_reservation_survives_delivery_crash(client, monkeypatch):
     product_id = await make_product(client, "1.00", 100, user_daily_limit=1)
     await seed_wallet(1)

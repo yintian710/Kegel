@@ -79,6 +79,14 @@ async def archive_product(product_id: str, request: Request):
     return good()
 
 
+@router.post("/admin/purchases/{order_no}/reconcile")
+async def reconcile_purchase(order_no: str, request: Request):
+    body = await json_body(request)
+    _admin(request)
+    auth.verify_secondary_secret(auth.secondary_secret_from(body, request.headers))
+    return good({"order": await catalog.reconcile(order_no, body.get("result"), body.get("trade_no"))})
+
+
 @router.post("/trigger/open")
 async def trigger_open(request: Request):
     await json_body(request)
