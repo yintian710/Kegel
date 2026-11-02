@@ -1,13 +1,14 @@
 # API 接口规范大全
 
-业务接口默认采用标准 HTTP/JSON 通信，请求体格式为 `application/json`，响应体统一采用（图标接口成功时直接返回 PNG 图片）：
+除 OAuth 跳转、LDC 纯文本通知和图标图片外，所有 JSON 接口使用统一响应信封：
 ```json
-{ "ok": true, ... }
+{ "code": 0, "data": { "业务字段": "..." }, "msg": "success" }
 ```
-异常情况下返回对应的 HTTP 状态码并附带错误提示：
+失败时 HTTP 状态码保持具体语义，`code` 与 HTTP 状态码相同，`data` 固定为 `null`：
 ```json
-{ "ok": false, "error": "错误原因说明" }
+{ "code": 401, "data": null, "msg": "请先使用 LINUX DO 登录" }
 ```
+旧响应中的 `ok` 字段已移除，其余业务字段整体放入 `data`。所有整型 `id` 和 `*_id` 字段在响应中序列化为字符串，避免 JavaScript 精度丢失；客户端回传这些值时保持字符串即可。原本就是字符串的 `user_id`、`flow_id`、`round_id` 和 `request_id` 不变。
 
 ---
 ## 公开图标接口
@@ -17,7 +18,7 @@
 - **查询参数**：`size` 可选，支持 `16`、`32`、`48`、`64`、`128`、`180`、`192`、`256`、`512`、`1024`，单位为像素，图片宽高相同。不传时返回原图（1254 × 1254）。
 - **响应**：成功返回 `200`，内容类型为 `image/png`，响应体为图片文件；不支持、空值或重复的 `size` 返回 `400` 和 JSON 错误信息。
 - **示例**：`/api/icon?size=192` 可直接用作 `<img src="/api/icon?size=192" alt="图标">` 的图片地址。
-- **图片文件**：原图位于 `static/img/icon.png`，各尺寸位于 `static/img/icon-{size}.png`，也可通过 `/img/icon-{size}.png` 直接访问。
+- **图片文件**：原图位于 `app/assets/img/icon.png`，各尺寸位于 `app/assets/img/icon-{size}.png`；图片统一通过 `/api/icon` 读取。
 
 ---
 
@@ -25,36 +26,32 @@
 ## 1. 身份认证与会话相关
 
 ### 1.1 发起 LINUX DO OAuth 登录
-- **路径**：`GET /auth/linuxdo/start`
+- **路径**：`GET /api/auth/linuxdo/start`
 - **查询参数**：
   - `next`：可选，登录成功后的回跳路径（限 `/`、`/practice`、`/shop`、`/donate`、`/admin`，默认 `/`）。
 - **说明**：生成带有随机防伪 `state` 的 HMAC-SHA256 签名 Cookie，并重定向至 `https://connect.linux.do/oauth2/authorize`。
-- **进站登录**：首页、练习页 `/practice`（含 `/practice.html`）、公开状态、访问打点及练习接口允许访客使用；商店、赞助页、管理页在配置 OAuth 后要求登录，相关用户数据接口返回 `401`。访客不能正式打卡或领取积分。
+- **进站登录**：首页、练习页 `/practice`、公开状态、访问打点及练习接口允许访客使用；商店、赞助页、管理页在配置 OAuth 后要求登录，相关用户数据接口返回 `401`。访客不能正式打卡或领取积分。
 
 ### 1.2 OAuth 回调处理
-- **路径**：`GET /auth/linuxdo/callback`
+- **路径**：`GET /api/auth/linuxdo/callback`
 - **查询参数**：`code` (授权码)、`state` (防伪串)。
 - **说明**：向 Connect 平台换取 Access Token，拉取用户唯一数字 ID 和用户名，签发有效期 5 天（`432000` 秒）的 `linuxdo_session` Cookie。有效期内访问已认证页面或业务接口时，签名过期时间与 Cookie 的有效期一同续至访问后的 5 天；过期后须重新登录，退出时清除 Cookie。
 
 ### 1.3 退出登录
-- **路径**：`GET /auth/logout`
+- **路径**：`GET /api/auth/logout`
 - **说明**：清除会话 Cookie 并重定向至首页。
 
 ### 1.4 查询当前登录身份
-- **路径**：`GET /api/me`
-- **响应示例**：
-```json
-{
-  "ok": true,
-  "user": {
-    "id": "12345",
-    "username": "example_user",
-    "name": "昵称"
-  }
-}
-```
+当前身份不再提供单独接口；读取 `GET /api/status` 的 `data.user`。商店、赞助和管理页面也分别从自身数据接口的 `data.user` 读取身份。
 
 ---
+## 健康检查
+
+- `GET /health`：无需认证，返回成功信封，`data` 为 `{ "status": "ok" }`。
+- `GET /api/heartbeat`：无需认证，返回 `{ "code": 0, "data": null, "msg": "success" }`。
+
+---
+
 
 ## 2. 每日打卡与练习接口
 
@@ -64,7 +61,8 @@
 - **响应示例**：
 ```json
 {
-  "ok": true,
+  "code": 0,
+  "data": {
   "user": { "id": "123", "username": "alice" },
   "day": "2026-10-27",
   "is_open": true,
@@ -98,6 +96,8 @@
     { "rank": 1, "username": "bob", "amount": 1000, "reward_status": "credited" },
     { "rank": 2, "username": "alice", "amount": 500, "reward_status": "unclaimed" }
   ]
+  },
+  "msg": "success"
 }
 ```
 
@@ -113,7 +113,8 @@
 - **响应示例**：
 ```json
 {
-  "ok": true,
+  "code": 0,
+  "data": {
   "session": {
     "token": "dGVzdC10b2tlbi0...",
     "step": 0,
@@ -121,6 +122,8 @@
     "wait_seconds": 8,
     "expires_in": 600
   }
+  },
+  "msg": "success"
 }
 ```
 
@@ -144,7 +147,7 @@
 
 #### 独立训练记录
 
-- `GET /api/practice`：公开读取训练页面数据，返回 `{ok,user,oauth_ready,day,leaderboard,total_leaderboard,records}`。`leaderboard` 是当日有效独立训练次数榜，`total_leaderboard` 是跨所有日期累计的总榜，两者均包含 `rank,username,count`，各限前 50 名，并统一排除待审核日期的记录；同分按最早上传时间、用户 ID 排序。`records` 仅包含当前登录账号最近 50 轮记录，访客为空。上传接口同样返回每日榜和总榜，重复提交不重复计入任一榜单。
+- `GET /api/practice`：公开读取训练页面数据。成功信封的 `data` 包含 `user,oauth_ready,day,leaderboard,total_leaderboard,records`。`leaderboard` 是当日有效独立训练次数榜，`total_leaderboard` 是跨所有日期累计的总榜，两者均包含 `rank,username,count`，各限前 50 名，并统一排除待审核日期的记录；同分按最早上传时间、用户 ID 排序。`records` 仅包含当前登录账号最近 50 轮记录，访客为空。上传接口同样返回每日榜和总榜，重复提交不重复计入任一榜单。
 - `POST /api/practice/records`：须登录，请求体示例为 `{"round_id":"12891f40-4e3f-4a38-8c3d-bc1f4a850bb2","started_at":1790000000000,"ended_at":1790000030000,"repetitions":10,"interval_seconds":3,"mode":"auto","expected_user_id":"123"}`。实际起止时间须满足下述时效范围，两个时间为 Unix 毫秒整数；方式为 `manual` 或 `auto`，实际完成次数 1–20 整数、每次时长 `interval_seconds` 为 2–10 整数秒。放弃本轮时仅提交完整完成的次数，零次不提交；三阶段比例由浏览器保存，不参与服务端计数。响应包含与 GET 相同的数据及本次 `record`。
 - 记录归属取服务端登录身份；可选 `expected_user_id` 仅校验账号是否切换，不用于指定归属。身份不匹配或同一轮内容冲突返回 `409`，未登录返回 `401`，待审核用户返回 `403`。
 - 时间须满足开始早于结束、总时长至少为次数乘间隔；开始不早于当前一小时、结束不早于当前五分钟，最多允许未来 30 秒。非法输入返回 `400`。同用户的时间区间跨日也不得重叠，端点相接允许，重叠返回 `409`。
@@ -171,13 +174,14 @@
 - **响应示例**：
 ```json
 {
-  "ok": true,
+  "code": 0,
+  "data": {
   "user": { "id": "123", "username": "alice" },
   "wallet": { "balance": 1500 },
   "quota": { "limit": "800.00", "used": "500.00", "remaining": "300.00" },
   "ledger": [
     {
-      "id": 1,
+      "id": "1",
       "kind": "checkin",
       "reference": "2026-10-27:123",
       "delta": 500,
@@ -187,7 +191,7 @@
   ],
   "products": [
     {
-      "id": 1,
+      "id": "1",
       "category": "LDC",
       "name": "1.00 LDC 积分兑换",
       "description": "购买后系统自动调用接口发货",
@@ -203,6 +207,8 @@
     }
   ],
   "purchases": []
+  },
+  "msg": "success"
 }
 
 ```
@@ -214,7 +220,7 @@
 - **认证**：必须登录
 - **请求体**：
 ```json
-{ "product_id": 1, "request_id": "63097d87-712c-4b44-bf90-58b2b9264461" }
+{ "product_id": "1", "request_id": "63097d87-712c-4b44-bf90-58b2b9264461" }
 ```
 - **说明**：
   - 在写事务内检查个人、商品全站限购及当日剩余 LDC 额度，扣除积分并保存 `pending` 订单；提交保存后再发货；
@@ -226,7 +232,8 @@
 - **响应示例**：
 ```json
 {
-  "ok": true,
+  "code": 0,
+  "data": {
   "status": "success",
   "trade_no": "TX20261027001",
   "error": "",
@@ -237,6 +244,8 @@
     "ldc_amount": "1.00",
     "status": "success"
   }
+  },
+  "msg": "success"
 }
 ```
 
@@ -249,7 +258,8 @@
 - **响应示例**：
 ```json
 {
-  "ok": true,
+  "code": 0,
+  "data": {
   "donation_ready": true,
   "donation_leaderboard": [
     { "rank": 1, "username": "bob", "amount": "50.00", "count": 2 },
@@ -264,6 +274,8 @@
       "paid_at": "2026-10-27T08:10:30Z"
     }
   ]
+  },
+  "msg": "success"
 }
 ```
 
@@ -277,7 +289,7 @@
 - **说明**：返回带有 MD5 防伪签名的表单字段，前端创建隐藏 Form 表单直接 POST 跳转至官方支付平台。
 
 ### 4.3 官方支付平台异步通知
-- **路径**：`GET /payments/ldc/notify`
+- **路径**：`GET /api/payments/ldc/notify`
 - **说明**：官方支付成功回调，校验 MD5 签名、交易单号唯一性并结算订单，成功返回 `success`。
 
 ---
@@ -296,8 +308,8 @@ X-Admin-Token: <ADMIN_TOKEN>
 | `/api/admin/settings` | POST | `{ "deadline": "22:00", "min_step_seconds": 8, "condition_url": "..." }` | 保存每日基础规则；LDC 兑换额度仅由 `DAILY_LDC_LIMIT` 环境变量配置，修改后需重启 |
 | `/api/admin/settings` | POST | `{ "reward_tiers": [{ "through": 10, "amount": 1000 }, ...] }` | 保存阶梯排名奖励配置 |
 | `/api/admin/review` | POST | `{ "user_id": "123", "approved": true }` | 批准异常访问标记，恢复正常打卡资格 |
-| `/api/admin/products` | POST | `{ "id"?: 1, "category": "LDC", "name": "...", "points_price": 500, "ldc_amount": "1.00", "user_daily_limit": 1, "total_daily_limit": 10, "is_active": true }` | 新增或编辑商品 |
-| `/api/admin/products/<id>/archive` | POST | `{}` | 立即下架指定商品 |
+| `/api/admin/products` | POST | `{ "id"?: "1", "category": "LDC", "name": "...", "points_price": 500, "ldc_amount": "1.00", "user_daily_limit": 1, "total_daily_limit": 10, "is_active": true, "secondary_secret": "..." }` | 验证二级密码后新增或编辑商品 |
+| `/api/admin/products/<id>/archive` | POST | `{ "secondary_secret": "..." }` | 验证二级密码后立即下架指定商品 |
 | `/api/admin/users?q=<用户名或用户ID>` | GET | 无 | 搜索已有站内记录的数字 ID 用户，用户名不区分 ASCII 大小写、支持部分匹配与 `@` 前缀，ID 精确匹配；最多返回 50 位用户及余额 |
 | `/api/admin/points/add` | POST | `{ "user_id": "123", "amount": 250, "secondary_secret": "输入的二级密码", "request_id": "客户端生成的UUID" }` | 验证管理员口令与二级密码后增加站内积分，返回 `user`、`wallet`、`entry` |
 

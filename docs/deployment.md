@@ -6,81 +6,148 @@
 
 ## 1. 运行环境要求
 
-- **操作系统**：Linux (Ubuntu 22.04 / Debian 12 / AlmaLinux 9 等推荐) / macOS
-- **Python 环境**：`Python >= 3.14`（推荐使用 `uv` 管理）
-- **外网条件**：
-  - 需要能够正常出网访问 `connect.linux.do` 和 `credit.linux.do`
-  - 生产环境必须拥有已解析的域名并配置 **HTTPS 证书**
+- **操作系统**：Linux（Ubuntu 22.04、Debian 12、AlmaLinux 9 等）或 macOS。
+- **后端**：Python >= 3.12、`uv`、PostgreSQL。
+- **前端**：Node.js 与 `pnpm`，生产构建产物由 Web 服务器静态托管。
+- **外网条件**：可访问 `connect.linux.do` 和 `credit.linux.do`；生产域名必须配置 HTTPS。
 
----
-
-## 2. 环境变量配置清单 (`.env`)
-
-在项目根目录下复制 `.env.example` 为 `.env` 并按需配置：
+先同步 Python 依赖：
 
 ```bash
-# 1. 存储与网络
-CHECKIN_DB=checkin.db
-HOST=127.0.0.1
-PORT=8000
-APP_BASE_URL=https://kegel.yourdomain.com
+uv sync
+```
 
-# 2. 安全与密钥 (生产环境必须设置至少 32 字符的强随机串)
+## 2. 环境变量配置清单（`.env`）
+
+复制 `.env.example` 为 `.env`。已有进程环境变量优先于文件中的同名配置，真实密钥不得提交到仓库。
+
+```dotenv
+# 网络、前端与数据库
+HOST=127.0.0.1
+PORT=7188
+APP_BASE_URL=https://kegel.yourdomain.com
+FRONTEND_BASE_PATH=/new/
+DATABASE_URL=postgres://kegel:replace-with-password@127.0.0.1:5432/kegel
+SNOWFLAKE_WORKER_ID=0
+
+# 密钥与管理
 APP_SECRET=your-super-long-and-secure-random-secret-key-at-least-32-chars
 ADMIN_TOKEN=your-strong-admin-token-for-management-console
-# 管理员加积分二级密码，仅填写下方生成命令输出的加盐哈希；留空禁用加积分:
+# 敏感管理操作二选一：明文二级密码，或下文命令生成的加盐哈希
+ADMIN_SECONDARY_PASSWORD=
 ADMIN_POINTS_PASSWORD_HASH=
 
-# 3. LINUX DO Connect 授权配置 (用于用户登录)
+# LINUX DO Connect
 LINUXDO_CLIENT_ID=your-connect-client-id
 LINUXDO_CLIENT_SECRET=your-connect-client-secret
-LINUXDO_REDIRECT_URI=https://kegel.yourdomain.com/auth/linuxdo/callback
+LINUXDO_REDIRECT_URI=https://kegel.yourdomain.com/api/auth/linuxdo/callback
 
-# 4. LINUX DO Credit 平台商户配置 (用于商品自动发货与独立赞助)
-# 开启赞助功能:
+# LINUX DO Credit
 LDC_DONATION_ENABLED=true
-# 开启商品兑换真实发货 (设为 false 时为模拟发货):
 LDC_LIVE=true
 LDC_API_BASE=https://credit.linux.do
 LDC_CLIENT_ID=your-credit-merchant-id
 LDC_CLIENT_SECRET=your-credit-merchant-secret
-# 全站每日 LDC 兑换额度（整数 LDC，默认 800；0 停止兑换且不影响签到积分）:
 DAILY_LDC_LIMIT=800
+PAYMENT_LOG_PATH=/var/log/kegel/payments.jsonl
 
-
-# 5. 自动化与调度
+# 自动化
 CHECKIN_TRIGGER_TOKEN=your-optional-token-to-open-checkin-via-webhook
 CHECKIN_CONDITION_TOKEN=your-optional-bearer-token-for-condition-polling
 ```
 
-修改 `DAILY_LDC_LIMIT` 后必须重启服务才能生效；额度按北京时间每日重置。
+`SNOWFLAKE_WORKER_ID` 取值为 0–1023；生产必须显式设置，多实例必须各不相同。`APP_SECRET` 在生产环境至少 32 字符。`LDC_DONATION_ENABLED` 控制赞助下单，`LDC_LIVE=false` 时商品兑换使用模拟发货。`DAILY_LDC_LIMIT=0` 仅停止 LDC 兑换，不影响签到积分；修改后需重启。
 
----
+## 3. 数据库初始化
 
-## 3. 生产反向代理配置
+应用不会自动建表。先创建数据库和账户，再执行仓库提供的结构文件：
 
-**必须在前端挂一层反向代理（推荐 Caddy 或 Nginx）**，由其负责 TLS 证书续签、慢速连接拦截以及静态资源加速。
+```bash
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f sql/schema.sql
+```
 
-### 3.1 Caddyfile 配置示例（最推荐，全自动申请证书）
+首次初始化后可用以下命令确认表可访问：
+
+```bash
+psql "$DATABASE_URL" -c 'SELECT COUNT(*) FROM checkin_settings;'
+```
+
+## 4. 启动后端
+
+开发或前台运行：
+
+```bash
+uv run uvicorn app.server:app --host 127.0.0.1 --port 7188
+```
+
+仓库脚本会执行 `uv sync --frozen --no-dev` 并重启单机 uvicorn 进程：
+
+```bash
+scripts/update-backend.sh
+```
+
+健康检查为 `GET /health`，API 心跳为 `GET /api/heartbeat`。
+
+## 5. 前端开发与发布
+
+开发时在 `frontend/` 运行：
+
+```bash
+pnpm install
+pnpm dev
+```
+
+Vite 将 `/api` 代理到 `http://127.0.0.1:7188`，并把 Origin 改写为 `http://localhost:7188`。生产构建的 base 为 `/new/`，因此后端必须设置 `FRONTEND_BASE_PATH=/new/`：
+
+```bash
+pnpm build
+```
+
+也可从仓库根目录发布；`DEPLOY_DIR` 是 Web 服务器对应 `/new/` 的静态目录：
+
+```bash
+DEPLOY_DIR=/var/www/kegel/new scripts/update-frontend.sh
+```
+
+## 6. 生产反向代理配置
+
+反向代理只把 `/api/*` 与 `/health` 转发到 7188，并将前端构建产物托管在 `/new/`。History 模式路由必须回退到 `/new/index.html`。
+
+### 6.1 Caddyfile 示例
+
 ```caddy
 kegel.yourdomain.com {
     encode gzip zstd
-    
-    # 限制单次请求体体积，防御大包攻击
+
     request_body {
         max_size 1MB
     }
 
-    reverse_proxy 127.0.0.1:8000 {
-        header_up Host {host}
-        header_up X-Real-IP {remote_host}
-        header_up X-Forwarded-For {remote_host}
-        header_up X-Forwarded-Proto {scheme}
+    handle /api/* {
+        reverse_proxy 127.0.0.1:7188 {
+            header_up Host {host}
+            header_up X-Real-IP {remote_host}
+            header_up X-Forwarded-For {remote_host}
+            header_up X-Forwarded-Proto {scheme}
+        }
     }
+
+    handle /health {
+        reverse_proxy 127.0.0.1:7188
+    }
+
+    handle_path /new/* {
+        root * /var/www/kegel/new
+        try_files {path} /index.html
+        file_server
+    }
+
+    redir / /new/ 302
 }
 ```
 
-### 3.2 Nginx 配置示例
+### 6.2 Nginx 示例
+
 ```nginx
 server {
     listen 80;
@@ -94,34 +161,44 @@ server {
 
     ssl_certificate /etc/letsencrypt/live/kegel.yourdomain.com/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/kegel.yourdomain.com/privkey.pem;
-
     client_max_body_size 1M;
 
-    location / {
-        proxy_pass http://127.0.0.1:8000;
+    location /api/ {
+        proxy_pass http://127.0.0.1:7188;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
-
-        # 保持连接与超时设置
         proxy_connect_timeout 15s;
         proxy_read_timeout 30s;
         proxy_send_timeout 30s;
     }
+
+    location = /health {
+        proxy_pass http://127.0.0.1:7188/health;
+    }
+
+    location /new/ {
+        alias /var/www/kegel/new/;
+        try_files $uri $uri/ /new/index.html;
+    }
+
+    location = / {
+        return 302 /new/;
+    }
 }
 ```
 
----
+`APP_BASE_URL` 应为站点公开源地址（如 `https://kegel.yourdomain.com`），不包含 `/new/`。Connect 后台回调地址须同步为 `/api/auth/linuxdo/callback`；LDC 商户通知地址为 `<APP_BASE_URL>/api/payments/ldc/notify`。
 
-## 4. Systemd 守护进程服务配置
+## 7. systemd 守护进程
 
-在 `/etc/systemd/system/kegel.service` 创建服务文件：
+在 `/etc/systemd/system/kegel.service` 创建：
 
 ```ini
 [Unit]
-Description=Kegel Daily Checkin and Shop Service
-After=network.target
+Description=Kegel FastAPI Service
+After=network.target postgresql.service
 
 [Service]
 Type=simple
@@ -129,11 +206,9 @@ User=www-data
 Group=www-data
 WorkingDirectory=/var/www/Kegel
 EnvironmentFile=/var/www/Kegel/.env
-ExecStart=/usr/local/bin/python3 app.py
+ExecStart=/usr/local/bin/uv run --no-dev uvicorn app.server:app --host 127.0.0.1 --port 7188
 Restart=always
 RestartSec=5
-
-# 资源防护限制
 LimitNOFILE=65535
 PrivateTmp=true
 
@@ -141,57 +216,54 @@ PrivateTmp=true
 WantedBy=multi-user.target
 ```
 
-启动与自启：
 ```bash
 sudo systemctl daemon-reload
 sudo systemctl enable --now kegel
 sudo systemctl status kegel
 ```
 
----
+## 8. 数据备份与完整性自检
 
-## 5. 数据备份与维护策略
-
-系统所有状态和账本流水均持久化在单个 SQLite 文件中（默认 `checkin.db`）。
-
-### 5.1 热备份脚本 (基于 SQLite 官方安全热备)
-在 SQLite 运行期间，切勿直接 `cp` 正在处于 WAL 写入的 `.db` 文件。建议使用内置命令执行原子热备份：
+使用 `pg_dump` 创建 PostgreSQL 一致性备份：
 
 ```bash
-# 运行原子安全热备到指定目录
-sqlite3 checkin.db "VACUUM INTO '/backup/kegel_backup_$(date +%Y%m%d_%H%M%S).db';"
+pg_dump --format=custom --file="/backup/kegel_$(date +%Y%m%d_%H%M%S).dump" "$DATABASE_URL"
 ```
-可将该命令写入每日凌晨定时任务（crontab）：
+
+恢复前应在隔离环境验证备份：
+
 ```bash
-0 3 * * * sqlite3 /var/www/Kegel/checkin.db "VACUUM INTO '/backup/kegel_$(date +\%Y\%m\%d).db';"
+createdb kegel_restore_check
+pg_restore --exit-on-error --clean --if-exists --no-owner --dbname=kegel_restore_check /backup/kegel_YYYYMMDD_HHMMSS.dump
+psql kegel_restore_check -c 'SELECT COUNT(*) FROM points_ledger;'
 ```
 
-### 5.2 数据库完整性自检
+日常自检可检查连接、表及无效索引：
+
 ```bash
-sqlite3 checkin.db "PRAGMA integrity_check;"
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c 'SELECT 1;'
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c "SELECT n.nspname AS schema_name, c.relname AS index_name FROM pg_index i JOIN pg_class c ON c.oid=i.indexrelid JOIN pg_namespace n ON n.oid=c.relnamespace WHERE NOT i.indisvalid;"
 ```
-输出 `ok` 即表示数据完整无损。
 
-### 5.3 支付请求与响应日志
+数据库备份与支付日志需分别保存，并定期实际演练恢复。
 
-默认启用，UTF-8 JSONL 格式，追加写入数据库同目录下的 `<数据库名>.payments.jsonl`（默认 `checkin.payments.jsonl`）。设置 `PAYMENT_LOG_PATH=/var/log/kegel/payments.jsonl` 可覆盖位置；服务账户需要目录写入权限，新建文件权限为 `0600`。修改环境变量后重启服务生效。
+### 8.1 支付请求与响应日志
 
-- 记录 `/api/shop`、`/api/shop/purchase`、`/api/donations`、`/api/donations/create`、`/payments/ldc/notify` 和 `/api/admin/points/add` 的请求 URL、请求头、已接收的请求体及响应头、响应体。管理员加积分的二级密码始终脱敏。
-- 记录服务端访问 `/lpay/`、`/epay/` 接口时的请求、完整响应、HTTP 状态及异常。包括非 JSON 和非 2xx 响应，不对业务内容做长度截断。
-- 使用 `exchange_id` 关联同一次请求与响应，订单号和交易号用于跨请求对账。回调通过记录 `callback.accepted`（包括已结算订单的重复通知），拒绝记录 `callback.rejected` 及具体原因，处理异常记录 `callback.error`。
-- 认证头、Cookie、商户密钥、令牌和签名脱敏；订单号、交易号、金额、错误消息及其他业务字段保留。现有 HTTP 访问日志中的签名也会脱敏。
-- 日志独立于数据库事务保存，订单事务回滚不删除日志。文件写入失败时，将脱敏后的完整事件输出到标准错误，不改变支付结果；需同时保留服务的标准错误日志。
-- 不自动轮转、截断或删除，备份时需单独保存，持续监控磁盘空间。拒绝超大请求或来源校验失败时，不会为日志额外读取未接收的请求体。
+默认写入项目根目录 `checkin.payments.jsonl`；可用 `PAYMENT_LOG_PATH` 指定位置。日志为 UTF-8 JSONL、追加写入、不自动轮转，新建文件权限为 `0600`，服务账户必须有目录写权限。
 
-赞助支付通过浏览器表单直接提交至 LDC，服务端仅能记录生成的支付表单和后续回调，无法看到浏览器与网关之间的响应。当前没有主动查单流程。浏览器回跳不会确认到账；回调仍须通过签名、`TRADE_SUCCESS`、商户、订单、金额及交易号校验，不依赖 `code`。未知字段或状态会被拒绝并记录原因，不会因仅有交易号就跳过验签。
+- 记录 `/api/shop`、`/api/shop/purchase`、`/api/donations`、`/api/donations/create`、`/api/payments/ldc/notify` 和 `/api/admin/points/add` 的请求与响应；二级密码始终脱敏。
+- 记录服务端访问 `/lpay/`、`/epay/` 时的完整响应、HTTP 状态和异常。
+- 使用 `exchange_id` 关联请求与响应；回调接受、拒绝和异常均写入事件。
+- 认证头、Cookie、商户密钥、令牌和签名脱敏；订单号、交易号、金额和错误消息保留。
+- 日志写入失败时，脱敏事件输出到标准错误，不改变支付结果。需轮转日志并监控磁盘空间。
 
-日志只覆盖更新并重启后的请求，不能恢复历史未记录的响应。历史可疑失败订单仍需按商户订单号与 LDC 对账。
+赞助由浏览器直接提交到 LDC；服务端只能记录生成的支付表单及后续回调。浏览器回跳不确认到账，回调仍须完成签名、状态、商户、订单、金额和交易号校验。历史可疑订单需按商户订单号人工对账。
 
-### 5.4 管理员加积分二级密码
+### 8.2 管理员敏感操作二级密码
 
-管理员页面的“记录查询 → 用户积分余额”支持搜索用户并增加积分，每笔操作同时需要管理员口令和二级密码。`.env` 中只保存 `ADMIN_POINTS_PASSWORD_HASH`，不保存明文密码。使用 Python 标准库 PBKDF2-HMAC-SHA256，迭代 600000 次、随机 16 字节盐；与普通 SHA-256 摘要不兼容。
+管理员修改排名奖励、商品上架/编辑/下架和人工加积分时需要二级密码。可直接设置 `ADMIN_SECONDARY_PASSWORD`，也可仅保存 `ADMIN_POINTS_PASSWORD_HASH`。哈希采用 PBKDF2-HMAC-SHA256、600000 次迭代和随机 16 字节盐。
 
-在自己的终端运行以下命令，输入两次二级密码（输入不回显）。将输出的整行原样放入 `.env`，然后重启服务：
+在自己的终端运行以下命令，输入两次二级密码（输入不回显），将输出整行原样写入 `.env`：
 
 ```bash
 python3 -c '
@@ -206,6 +278,8 @@ print("ADMIN_POINTS_PASSWORD_HASH=pbkdf2_sha256$600000$" + salt.hex() + "$" + di
 '
 ```
 
-通过系统环境变量或 shell 设置时，须用单引号包住哈希，防止 `$` 被 shell 展开。配置缺失或格式错误时加积分接口拒绝操作；其他管理功能不受影响。每次加积分都需重新输入密码，浏览器不会保存二级密码，支付日志中也会脱敏。
+通过 shell 设置时须用单引号包住哈希，避免 `$` 被展开。单笔人工加分支持 1–100000000 整数积分；余额和 `admin_credit` 流水同事务提交，相同请求编号重试不会重复入账。
 
-单笔支持 1–100000000 整数积分，余额与 `admin_credit` 流水一起提交。核对目标用户名、ID 和金额后再提交；同一请求重试不会重复加分。加积分不直接调整 LDC 兑换额度，也不确认赞助到账。
+## 9. 部署边界
+
+PostgreSQL 可供一个或多个应用实例连接；多实例的 `SNOWFLAKE_WORKER_ID` 必须各不相同，且调度职责需确保不会因重复启动造成重复任务。关键写流程使用 PostgreSQL 事务级咨询锁串行化。支付对账日志仍是各实例本机文件：多实例部署时应设置各自路径并集中采集、备份和检索，不能把单个本机文件视为全站完整日志。

@@ -1,6 +1,6 @@
 # Kegel - 每日提肛打卡
 
-基于 LINUX DO Connect 身份认证的每日提肛打卡站点。使用 Python 3.14 及以上版本的标准库与 SQLite，无需安装第三方依赖。整体采用现代简约设计（纯净白底、深色字体与青绿点缀，告别沉重边框与背景图片），提供沉浸平滑的淡入淡出练习体验。
+基于 LINUX DO Connect 身份认证的每日提肛打卡站点。后端使用 Python 3.12+、FastAPI、Tortoise ORM 与 PostgreSQL，前端使用 Vue 3、Vite、TypeScript、Naive UI 与 Pinia。整体采用现代简约设计（纯净白底、深色字体与青绿点缀，告别沉重边框与背景图片），提供沉浸平滑的淡入淡出练习体验。
 
 站点结构：
 - **首页 `/`**：独立的每日三次手动打卡。今日已完成打卡时直接展示结算页、打卡奖励榜与奖励规则；未完成时展示初始页，点击或按键进入打卡准备阶段。首页不展示训练榜，训练的设置、进度和完成状态不会接管首页，也不会触发页面跳转。右侧保留隐藏称呼、自定义称呼和浏览器提醒设置。
@@ -9,39 +9,48 @@
 - **赞助 `/donate`**：独立的 LDC 赞助支持页面，提供赞助输入与快捷档位，明确说明**赞助不会增加站内积分**；展示已核验到账的公开赞助榜和个人赞助记录。
 - **管理后台 `/admin`**：提供概览监控卡片、基础规则配置、排名奖励、商品管理（添加、修改、下架）、练习触发记录查询和用户余额。
 
-上述五个页面统一使用 `static/navigation.js` 顶部导航组件，共享菜单顺序、当前页高亮、账户及登录退出行为，支持窄屏横向滚动。首页初始页也显示导航；管理后台布局在导航下方。新增导航脚本已加入后端静态资源路由，更新后需重启应用进程。
+上述五个页面统一使用 Vue 前端的 `AppLayout` 布局及复用组件，共享菜单顺序、当前页高亮、账户及登录退出行为，支持窄屏横向滚动。首页初始页也显示导航；管理后台布局在导航下方。
 
 ## 启动与配置
 
 ```bash
 cp .env.example .env
-# 编辑 .env，填写 Connect 凭据、随机密钥和管理口令
-python3 app.py
+# 编辑 .env，填写 PostgreSQL、Connect 凭据、随机密钥和管理口令
+uv sync
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f sql/schema.sql
+uv run uvicorn app.server:app --host 127.0.0.1 --port 7188
 ```
 
-打开 `http://localhost:8000`；管理页面为 `/admin`。程序内置 `.env` 加载，已存在的进程环境变量优先。不要提交 `.env`、数据库或真实密钥。
+打开 `http://localhost:7188`；前端开发在 `frontend/` 运行 `pnpm dev`，管理页面为 `/admin`。生产构建运行 `pnpm build`，静态站点发布到 `/new/` 时设置 `FRONTEND_BASE_PATH=/new/`。程序内置 `.env` 加载，已存在的进程环境变量优先。不要提交 `.env`、数据库凭据或真实密钥。
 
-签到必须通过 Connect OAuth 登录，不提供演示身份。将应用回调地址配置为 `http://localhost:8000/auth/linuxdo/callback`，部署后改为公开 HTTPS 地址并同步 `APP_BASE_URL` 与 `LINUXDO_REDIRECT_URI`。未配置 OAuth 时无法签到。`ADMIN_TOKEN` 未设置时所有管理接口拒绝访问；触发接口同样需要独立的 `CHECKIN_TRIGGER_TOKEN`。
+后端健康检查为 `/health`，API 心跳为 `/api/heartbeat`；图标继续由 `/api/icon` 提供，图片文件位于 `app/assets/img/`。
+
+签到必须通过 Connect OAuth 登录，不提供演示身份。将应用回调地址配置为 `http://localhost:7188/api/auth/linuxdo/callback`，部署后改为公开 HTTPS 地址并同步 `APP_BASE_URL` 与 `LINUXDO_REDIRECT_URI`。未配置 OAuth 时无法签到。`ADMIN_TOKEN` 未设置时所有管理接口拒绝访问；触发接口同样需要独立的 `CHECKIN_TRIGGER_TOKEN`。
 
 首页、公开状态及练习接口无需登录。配置完整的 OAuth 凭据后，商店、赞助页和管理页仍要求登录。访客练习不记录正式打卡、不累计排行榜、不领取奖励。登录 Cookie 有效期为 **5 天**，有效期内访问时自动续至访问后的 5 天；过期或退出后需重新登录。
 
 | 环境变量 | 用途与默认值 |
 | --- | --- |
-| `CHECKIN_DB` | SQLite 文件路径，默认 `checkin.db`。旧 `redpacket.db` 保留但不再使用。 |
 | `HOST` | 监听地址，默认 `127.0.0.1`。 |
-| `PORT` | 监听端口，默认 `8000`。 |
-| `APP_BASE_URL` | 对外完整地址，默认 `http://localhost:<PORT>`；生产使用 HTTPS。 |
-| `APP_SECRET` | 会话签名密钥。生产必须设置至少 32 字符的随机值；仅本地开发允许每次启动自动生成，重启会使旧会话失效。 |
+| `PORT` | 监听端口，默认 `7188`。 |
+| `APP_BASE_URL` | 对外完整源地址，默认 `http://localhost:<PORT>`；生产使用 HTTPS。 |
+| `FRONTEND_BASE_PATH` | 前端路径前缀，开发默认 `/`；生产构建发布到 `/new/` 时设为 `/new/`。 |
+| `DATABASE_URL` | PostgreSQL 连接串，默认连接本机 `kegel` 数据库；表结构由 `sql/schema.sql` 初始化。 |
+| `SNOWFLAKE_WORKER_ID` | 雪花 ID 机器号，0–1023，默认 `0`；生产必须显式设置，多实例各不相同。 |
+| `APP_SECRET` | 会话签名密钥。生产必须设置至少 32 字符的随机值；仅本地开发允许启动时自动生成。 |
 | `ADMIN_TOKEN` | 管理接口 `X-Admin-Token` 口令；未设置则拒绝管理访问。 |
-| `LINUXDO_CLIENT_ID` | Connect OAuth 应用 Client ID，登录必需。 |
-| `LINUXDO_CLIENT_SECRET` | Connect OAuth 应用 Client Secret，登录必需。 |
-| `LINUXDO_REDIRECT_URI` | OAuth 回调地址，默认 `<APP_BASE_URL>/auth/linuxdo/callback`。 |
+| `ADMIN_SECONDARY_PASSWORD` | 管理员敏感操作的明文二级密码；可与下一项二选一。 |
+| `ADMIN_POINTS_PASSWORD_HASH` | 管理员敏感操作二级密码的 PBKDF2 加盐哈希。 |
+| `LINUXDO_CLIENT_ID` / `LINUXDO_CLIENT_SECRET` | Connect OAuth 应用凭据，登录必需。 |
+| `LINUXDO_REDIRECT_URI` | OAuth 回调地址，默认 `<APP_BASE_URL>/api/auth/linuxdo/callback`。 |
 | `LDC_DONATION_ENABLED` | 默认 `false`；开启并配置商户凭据后允许创建真实 LDC 赞助订单。 |
+| `LDC_LIVE` | 默认 `false`，商品兑换模拟发货；设为 `true` 后调用真实发货接口。 |
 | `LDC_API_BASE` | 官方商户网关，默认 `https://credit.linux.do`。 |
-| `LDC_CLIENT_ID` / `LDC_CLIENT_SECRET` | Credit 商户 API Key，用于赞助订单签名及支付通知验签。 |
-| `DAILY_LDC_LIMIT` | 全站每日 LDC 兑换额度，整数 LDC，默认 `800`；`0` 停止兑换但不影响签到积分。修改后需重启服务生效。 |
-| `CHECKIN_TRIGGER_TOKEN` | 外部开放触发接口 `X-Trigger-Token` 口令；不设置则不能使用该入口。 |
-| `CHECKIN_CONDITION_TOKEN` | 可选条件接口请求的 Bearer 令牌；仅发给配置的 `condition_url`。 |
+| `LDC_CLIENT_ID` / `LDC_CLIENT_SECRET` | Credit 商户凭据，用于赞助签名、通知验签和商品发货。 |
+| `DAILY_LDC_LIMIT` | 全站每日 LDC 兑换额度，默认 `800`；`0` 停止兑换但不影响签到积分。 |
+| `PAYMENT_LOG_PATH` | 本机支付 JSONL 日志路径；留空为项目根目录 `checkin.payments.jsonl`。 |
+| `CHECKIN_TRIGGER_TOKEN` | 外部开放触发接口 `X-Trigger-Token` 口令；留空禁用。 |
+| `CHECKIN_CONDITION_TOKEN` | 可选条件接口请求的 Bearer 令牌。 |
 
 凭据与全站每日 LDC 兑换额度由环境变量配置；每日截止时间、步骤间隔、奖励区间与 `condition_url` 通过管理页或管理 API 保存到数据库。每日奖励为本地整数站内积分入账，无需任何支付凭据。LDC 赞助与站内积分独立，不提供充值或购买比例配置。
 
@@ -63,18 +72,18 @@ python3 app.py
 
 ```bash
 # 立即开放今天的签到
-curl -X POST http://localhost:8000/api/admin/open \
+curl -X POST http://localhost:7188/api/admin/open \
   -H "X-Admin-Token: $ADMIN_TOKEN" \
   -H 'Content-Type: application/json' -d '{}'
 
 # 配置每日到点开放时间、步骤间隔、整数站内积分奖励和可选条件地址
-curl -X POST http://localhost:8000/api/admin/settings \
+curl -X POST http://localhost:7188/api/admin/settings \
   -H "X-Admin-Token: $ADMIN_TOKEN" \
   -H 'Content-Type: application/json' \
   -d '{"deadline":"22:00","min_step_seconds":8,"reward_tiers":[{"through":10,"amount":1000},{"through":20,"amount":500},{"through":50,"amount":100}],"condition_url":"https://your-service.example/checkin-condition"}'
 
 # 定时任务或外部服务触发今天开放
-curl -X POST http://localhost:8000/api/trigger/open \
+curl -X POST http://localhost:7188/api/trigger/open \
   -H "X-Trigger-Token: $CHECKIN_TRIGGER_TOKEN" \
   -H 'Content-Type: application/json' -d '{}'
 ```
@@ -86,7 +95,7 @@ curl -X POST http://localhost:8000/api/trigger/open \
 访问记录关联已登录的 OAuth 身份，或未登录用户的签名匿名 Cookie，并记录散列后的 IP 与访问时间、频次。规律性访问等模式可使当天签到进入人工复核；管理员可在管理页面核实并批准，或调用：
 
 ```bash
-curl -X POST http://localhost:8000/api/admin/review \
+curl -X POST http://localhost:7188/api/admin/review \
   -H "X-Admin-Token: $ADMIN_TOKEN" \
   -H 'Content-Type: application/json' \
   -d '{"user_id":"123","approved":true}'
@@ -101,12 +110,12 @@ curl -X POST http://localhost:8000/api/admin/review \
   - **品类与配置**：商品品类固定为 `LDC`。后台新建或编辑商品时，选择品类、输入积分售价、发货 LDC 数量、单人每日限购数及全站每日总限购数（0 为不限）。
   - **购买自动发货**：确认兑换后，系统先在写事务内扣减积分、保存 `pending` 订单并提交，再调用 Linux DO Credit 商户接口 (`POST /lpay/distribute`) 转账。返回有效 `data.trade_no` 即为成功，无需 `code` 字段；明确拒绝才自动退款，超时或结果不明保留扣分与限额等待对账。前端为一次兑换保留请求编号，重试返回原订单，不重复扣分或分发。未配置商户凭据时运行于模拟发货模式。
   - **每日兑换额度**：商品按 `ldc_amount` 精确金额占用全站额度；处理中、成功、模拟和待核对订单占额，失败订单释放额度。额度按北京时间每日重置，设为 `0` 仅停止兑换。
-- **独立赞助 (`/donate`)**：登录后自行输入 **0.01–10000.00 LDC**，最多两位小数；页面不预填金额，快捷金额仅辅助填写。提交后跳转官方 LDC 支付平台。赞助**不会增加站内积分**。生产环境配置 `LDC_DONATION_ENABLED=true`、商户 `LDC_CLIENT_ID` / `LDC_CLIENT_SECRET` 和公网 HTTPS `APP_BASE_URL`。异步通知地址为 `<APP_BASE_URL>/payments/ldc/notify`。
+- **独立赞助 (`/donate`)**：登录后自行输入 **0.01–10000.00 LDC**，最多两位小数；页面不预填金额，快捷金额仅辅助填写。提交后跳转官方 LDC 支付平台。赞助**不会增加站内积分**。生产环境配置 `LDC_DONATION_ENABLED=true`、商户 `LDC_CLIENT_ID` / `LDC_CLIENT_SECRET` 和公网 HTTPS `APP_BASE_URL`。异步通知地址为 `<APP_BASE_URL>/api/payments/ldc/notify`。
 - **赞助榜**：页面公开展示已确认到账的 LDC 赞助榜（按累计赞助金额排序，显示排名、用户名、总额及次数），登录用户可查看自己的赞助订单。只有服务端通过 MD5 验签及订单对账后才会计入榜单，重复通知不会重复累计，浏览器跳转回页面不会确认到账。
-- **支付对账日志**：默认追加保存到数据库同目录的 `checkin.payments.jsonl`，可用 `PAYMENT_LOG_PATH` 指定位置。记录兑换、赞助接口及商户回调的请求和响应、外部分发原始响应、HTTP 错误、网络异常及回调拒绝原因；保留订单号、交易号、金额和关联编号，认证凭据、Cookie、签名脱敏。日志不自动轮转或删除，需单独备份并监控磁盘空间。仅能记录启用后的流量。
+- **支付对账日志**：默认追加保存到项目根目录 `checkin.payments.jsonl`，可用 `PAYMENT_LOG_PATH` 指定本机位置。记录兑换、赞助接口及商户回调的请求和响应、外部分发原始响应、HTTP 错误、网络异常及回调拒绝原因；认证凭据、Cookie 和签名脱敏。日志不自动轮转或删除，需单独备份并监控磁盘空间。
 ## 部署边界
 
-SQLite 部署仅支持单主机、单应用进程。不要让多个进程或多台主机同时运行并共享该数据库；单应用进程负责调度。生产应使用 HTTPS 反向代理，配置至少 32 字符的随机 `APP_SECRET`、独立管理与触发口令，并保护数据库及备份中的身份、访问和交易记录。迁移旧项目时默认新建 `checkin.db`，不读取或转换旧红包数据库。若现有签到数据库包含旧版支付记录，迁移仅保留历史审计，不将已支付的 LDC 转成站内积分。
+PostgreSQL 可供单实例或多实例后端连接；多实例的 `SNOWFLAKE_WORKER_ID` 必须各不相同，关键写流程使用 PostgreSQL 事务级咨询锁串行化。生产应使用 HTTPS 反向代理，将 `/api` 转发到 7188，并把前端构建产物静态托管到 `/new/`。支付对账日志仍是各实例的本机文件，多实例部署需分别采集和备份。还应配置至少 32 字符的随机 `APP_SECRET`、独立管理与触发口令，并保护数据库、备份及日志中的身份、访问和交易记录。
 
 `api.md` 与 `doc.md` 保留官方参考资料快照；本 README 描述当前服务。真实 OAuth 登录及真实 LDC 收款仍需使用自己的应用和商户凭据做线上联调。
 
@@ -115,5 +124,7 @@ SQLite 部署仅支持单主机、单应用进程。不要让多个进程或多�
 运行测试命令：
 
 ```bash
-python3 -m unittest discover -s tests
+uv run pytest
 ```
+
+测试使用 `pgserver` 启动临时 PostgreSQL，依赖已由 `uv sync` 安装，无需手动准备测试数据库。

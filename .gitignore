@@ -5,7 +5,7 @@
 *.pem
 *.key
 
-# SQLite 数据、日志及备份
+# 本地数据库、日志及备份（保留旧 SQLite 数据的忽略规则）
 *.db
 *.db-*
 *.sqlite
@@ -25,6 +25,25 @@ venv/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# 前端依赖、构建产物与工具缓存
+node_modules/
+dist/
+.vite/
+*.tsbuildinfo
+.pnpm-store/
+
+# 本地 PostgreSQL 数据与进程运行文件
+/pgdata/
+/.pgdata/
+/run/
+*.pid
+*.log
+
+# uv / pnpm 锁文件和 src 下自动生成的类型声明需要提交，不忽略。
 
 # 编辑器与系统文件
 .idea/
