@@ -884,6 +884,18 @@ button:disabled {
 .data-table tr:hover td {
   background: #f8fafc;
 }
+/* 右侧固定列（如“操作”）：横向滚动时始终可见 */
+.data-table td.cell-sticky-end {
+  position: sticky;
+  right: 0;
+  background: #fff;
+  box-shadow: -8px 0 8px -8px rgba(15, 23, 42, 0.18);
+}
+.data-table thead th.cell-sticky-end {
+  right: 0;
+  z-index: 3;
+  box-shadow: 0 1px 0 var(--border), -8px 0 8px -8px rgba(15, 23, 42, 0.18);
+}
 
 /* Prevent accidental wrap on badges, pills, buttons, and keys */
 .status-pill, .product-badge, .brand-badge, .rank-badge, .amount-chip, .btn-primary, .btn-secondary, .user-btn {

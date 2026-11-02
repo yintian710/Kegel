@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { claim, loginUrl, session as sessionApi, status as getStatus, visit, type CheckinEntry, type Session, type StatusData } from '../api'
 import { useBodyAttributes } from '../composables/useBodyAttributes'
 import { ft, preferenceQuery } from '../composables/usePreferences'
@@ -20,22 +20,30 @@ const showResult = ref(false)
 const completionKind = ref<CompletionKind>(null)
 const notice = ref('')
 const footerError = ref('')
+const now = ref(Date.now())
+const shownView = ref<'landing' | 'prompt' | 'completed'>('landing')
+const promptText = ref<string | null>(null)
+const contentEl = ref<HTMLElement | null>(null)
+const promptEl = ref<HTMLElement | null>(null)
 let noticeTimer: number | undefined
 let timer: number | undefined
 let pollTimer: number | undefined
+let unmounted = false
 
 const repetitions = computed(() => {
   const value = Number(activeSession.value?.repetitions)
   return Number.isInteger(value) && value >= 1 && value <= 20 ? value : 3
 })
 const completed = computed(() => showResult.value || Boolean(activeSession.value?.completed) || Boolean(activeSession.value && activeSession.value.step >= repetitions.value))
-const remaining = ref(0)
-const prompt = computed(() => {
-  if (!started.value) return ft('你今天提肛了吗？')
+const remaining = computed(() => activeSession.value ? Math.max(0, Math.ceil((readyAt.value - now.value) / 1000)) : 0)
+const targetPrompt = computed<string | null>(() => {
+  if (!started.value) return null
   if (!activeSession.value) return '开始第 1 次？'
   return `开始第 ${Math.min(step.value + 2, repetitions.value)} 次？`
 })
+const fadeSeconds = computed(() => (Number(activeSession.value?.interval_seconds ?? activeSession.value?.min_seconds ?? statusData.value?.min_step_seconds) || 2) / 2)
 const hint = computed(() => {
+  if (!started.value) return '点击任意位置开始'
   if (busy.value) return '正在记录，请稍候…'
   if (!activeSession.value) return '点击页面或按任意键，开始第 1 次'
   if (remaining.value > 0) return '轻轻收紧，缓慢放松 · 本次还剩 '
@@ -92,6 +100,7 @@ function reset(message?: string): void {
   if (message && started.value) notify(message)
 }
 function applySession(value: Session): void {
+  now.value = Date.now()
   const same = activeSession.value?.token === value.token
   activeSession.value = value
   step.value = Math.max(0, Math.min(Number(value.repetitions) || 3, Number(value.step) || 0))
@@ -133,9 +142,68 @@ async function completeSession(): Promise<void> {
   } catch (error) { notify(errorMessage(error)) }
   finally { busy.value = false }
 }
+function wait(milliseconds: number): Promise<void> { return new Promise(resolve => window.setTimeout(resolve, milliseconds)) }
+let promptFading = false
+let shownPrompt: string | null = null
+let pendingPrompt: string | null = null
+async function fadePrompt(hidden: boolean): Promise<void> {
+  const element = promptEl.value
+  if (!element) return
+  void getComputedStyle(element).opacity
+  element.classList.toggle('practice-text-fading', hidden)
+  const transitions = element.getAnimations().filter(animation => (animation as CSSTransition).transitionProperty === 'opacity')
+  await Promise.all(transitions.map(animation => animation.finished.catch(() => {})))
+}
+async function runPromptFade(): Promise<void> {
+  promptFading = true
+  try {
+    while (pendingPrompt !== null) {
+      if (pendingPrompt === shownPrompt) { pendingPrompt = null; break }
+      await fadePrompt(true)
+      const next = pendingPrompt
+      if (next === null) break
+      pendingPrompt = null
+      promptText.value = next; shownPrompt = next
+      await nextTick()
+      await fadePrompt(false)
+    }
+  } finally { promptFading = false }
+}
+function setPrompt(text: string | null): void {
+  if (text === null || !activeSession.value) {
+    pendingPrompt = null; shownPrompt = text; promptText.value = text
+    promptEl.value?.classList.remove('practice-text-fading')
+    return
+  }
+  pendingPrompt = text
+  if (!promptFading) void runPromptFade()
+}
+let desiredView: 'prompt' | 'completed' = 'prompt'
+let viewSwitching = false
+function switchView(target: 'prompt' | 'completed'): void {
+  desiredView = target
+  if (viewSwitching) return
+  const content = contentEl.value
+  if (shownView.value === desiredView || shownView.value === 'landing' || !content) { shownView.value = desiredView; return }
+  viewSwitching = true
+  void (async () => {
+    while (shownView.value !== desiredView) {
+      content.classList.add('scene-fading')
+      await wait(220)
+      shownView.value = desiredView
+      content.classList.remove('scene-fading')
+      await wait(220)
+    }
+    viewSwitching = false
+  })()
+}
+watch(targetPrompt, setPrompt, { immediate: true })
+watch(() => started.value ? (completed.value ? 'completed' : 'prompt') : null, target => { if (target) switchView(target) }, { immediate: true })
+watch(step, value => { document.body.dataset.step = String(value) })
 async function advance(): Promise<void> {
-  if (busy.value || polling.value || completed.value) return
+  if (busy.value || polling.value || completed.value || promptFading) return
   if (activeSession.value && expiresAt.value && Date.now() >= expiresAt.value) reset('十分钟未进入下一次，请从第一次重新开始。')
+  if (activeSession.value && step.value === repetitions.value - 1 && Date.now() >= readyAt.value) return completeSession()
   busy.value = true
   try {
     if (!started.value) {
@@ -151,7 +219,6 @@ async function advance(): Promise<void> {
     }
     if (!activeSession.value) { await begin(); return }
     if (Date.now() < readyAt.value) return
-    if (step.value === repetitions.value - 1) { await completeSession(); return }
     applySession((await sessionApi.step(activeSession.value.token)).session)
   } catch (error) { notify(errorMessage(error)) }
   finally { busy.value = false }
@@ -177,6 +244,7 @@ function stageKey(event: KeyboardEvent): void {
 }
 
 const visitPromise = visit().then(value => {
+  if (unmounted) return value
   applyStatus(value)
   const done = value.entry || (value.session?.completed || (value.session && value.session.step >= value.session.repetitions))
   if (done) {
@@ -191,23 +259,22 @@ const visitPromise = visit().then(value => {
 
 onMounted(() => {
   timer = window.setInterval(() => {
+    now.value = Date.now()
     if (!started.value || busy.value || polling.value || completed.value) return
-    remaining.value = activeSession.value ? Math.max(0, Math.ceil((readyAt.value - Date.now()) / 1000)) : 0
-    document.body.dataset.step = String(step.value)
     if (activeSession.value && expiresAt.value && Date.now() >= expiresAt.value) { reset('十分钟未进入下一次，本轮已失效，请从第一次重新开始。'); return }
     if (activeSession.value && !document.hidden && Date.now() >= readyAt.value && step.value === repetitions.value - 1) void completeSession()
   }, 250)
 })
-onBeforeUnmount(() => { if (timer) clearInterval(timer); if (pollTimer) clearInterval(pollTimer); if (noticeTimer) clearTimeout(noticeTimer) })
+onBeforeUnmount(() => { unmounted = true; if (timer) clearInterval(timer); if (pollTimer) clearInterval(pollTimer); if (noticeTimer) clearTimeout(noticeTimer) })
 </script>
 
 <template>
   <main class="stage-main" tabindex="0" :role="activeSession && remaining > 0 ? 'region' : 'button'" :aria-label="ft(activeSession && remaining > 0 ? `正在进行第 ${step + 1} 次练习，等待倒计时` : `开始第 ${activeSession ? Math.min(step + 2, repetitions) : 1} 次练习，点击开始`)" @click="stageClick" @keydown="stageKey">
-    <div class="stage-content">
-      <div v-if="!completed">
-        <h1 class="landing-prompt" aria-live="polite" aria-atomic="true"><template v-if="!started">你今天<span class="prompt-accent">{{ ft('提肛') }}</span>了吗？</template><template v-else>{{ prompt }}</template></h1>
-        <p class="landing-sub"><span>{{ hint }}</span><span>{{ remaining > 0 ? `${remaining} 秒` : '' }}</span></p>
-        <div v-if="activeSession" class="dots-progress" aria-label="练习进度"><span v-for="index in repetitions" :key="index" :class="{ active: index - 1 <= step }" /></div>
+    <div ref="contentEl" class="stage-content">
+      <div v-if="shownView !== 'completed'">
+        <h1 id="prompt" ref="promptEl" class="landing-prompt" :style="{ '--prompt-fade-duration': `${fadeSeconds}s` }" aria-live="polite" aria-atomic="true"><template v-if="promptText === null">你今天<span class="prompt-accent">{{ ft('提肛') }}</span>了吗？</template><template v-else>{{ promptText }}</template></h1>
+        <p class="landing-sub"><span>{{ hint }}</span><span id="stageCountdown">{{ remaining > 0 ? `${remaining} 秒` : '' }}</span></p>
+        <div v-if="activeSession && !completed" class="dots-progress" aria-label="练习进度"><span v-for="index in repetitions" :key="index" :class="{ active: index - 1 <= step }" /></div>
       </div>
       <section v-else class="completion-container" data-interactive>
         <div class="completion-card">
@@ -216,7 +283,7 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer); if (pollTimer) clearInt
             <h2 class="completion-title">{{ completionSummary.titlePrefix }}<span class="rank-num">{{ completionSummary.rank }}</span>{{ completionSummary.titleSuffix }}</h2>
             <p class="completion-reward-text">{{ completionSummary.rewardPrefix }}<b>{{ completionSummary.amount }}</b>{{ completionSummary.rewardSuffix }}</p>
             <div class="completion-actions">
-              <button v-if="!entry || entry.reward_status === 'unclaimed'" class="btn-primary" type="button" :disabled="busy || (!entry && !statusData?.oauth_ready)" @click="claimReward">{{ entry ? (busy ? '正在领取…' : '领取站内积分') : statusData?.oauth_ready ? 'LINUX DO 登录参与排名' : '登录暂未配置' }}</button>
+              <button v-if="entry ? entry.reward_status === 'unclaimed' : completionKind !== 'closed' && completionKind !== 'review'" class="btn-primary" type="button" :disabled="busy || (!entry && !statusData?.oauth_ready)" @click="claimReward">{{ entry ? (busy ? '正在领取…' : '领取站内积分') : statusData?.oauth_ready ? 'LINUX DO 登录参与排名' : '登录暂未配置' }}</button>
               <RouterLink class="btn-secondary" to="/practice" :query="preferenceQuery()">{{ ft('提肛练习') }}</RouterLink>
               <span v-if="statusPill" class="status-pill" :class="{ credited: entry?.reward_status === 'credited' }">{{ statusPill }}</span>
             </div>
@@ -224,8 +291,8 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer); if (pollTimer) clearInt
           </div>
         </div>
         <div class="completion-grid">
-          <details class="card card-collapse" open><summary class="card-header-line collapse-summary"><h3 class="card-title">今日榜单 <span class="card-subtitle">坚持打卡，赢取更多奖励</span></h3><span style="font-size:12px;color:var(--text-dim)">已有 {{ statusData?.total || 0 }} 人完成今日打卡</span></summary><div class="collapse-body"><div class="table-wrap" style="max-height:380px"><table class="rank-table"><thead><tr><th>名次</th><th>用户名</th><th>奖励积分</th></tr></thead><tbody><tr v-if="!statusData?.leaderboard.length"><td colspan="3" style="text-align:center;color:var(--text-dim)">今天的第一份向上，正在路上。</td></tr><tr v-for="record in statusData?.leaderboard || []" :key="`${record.rank}-${record.username}`" :class="{ 'current-user': record.username === statusData?.user?.username }"><td><span v-if="record.rank <= 3" class="rank-badge" :class="`rank-${record.rank}`">{{ record.rank }}</span><template v-else>{{ record.rank }}</template></td><td>{{ record.username === statusData?.user?.username ? `你 (@${record.username})` : `@${record.username}` }}</td><td>{{ record.amount }}</td></tr></tbody></table></div></div></details>
-          <details class="card card-collapse" open><summary class="card-header-line collapse-summary"><h3 class="card-title">奖励规则 <span class="card-subtitle">根据今日打卡名次获得对应站内积分</span></h3></summary><div class="collapse-body"><ul class="rules-list"><li v-for="rule in rewardRules" :key="rule.label"><span class="tier-range">{{ rule.label }}</span><span class="tier-val" :style="rule.rewarded ? undefined : { color: 'var(--text-dim)' }">{{ rule.value }}</span></li></ul><div class="quota-box"><div class="card-header-line" style="margin-bottom:10px"><h4 class="card-title" style="font-size:15px">今日 LDC 兑换额度 <span class="card-subtitle">全站每日兑换金额上限，北京时间重置</span></h4></div><div class="quota-labels"><span>今日已兑换 {{ statusData?.quota.used || '0.00' }} / {{ statusData?.quota.limit || '0.00' }} LDC</span><span style="color:var(--primary);font-weight:600">剩余 {{ statusData?.quota.remaining || '0.00' }} LDC</span></div><div class="quota-bar-track"><div class="quota-bar-fill" :style="{ width: `${quotaPercent}%` }" /></div></div></div></details>
+          <details class="card card-collapse" open><summary class="card-header-line collapse-summary"><h3 class="card-title">今日榜单 <span class="card-subtitle">坚持打卡，赢取更多奖励</span></h3><div style="display:flex;align-items:center;gap:8px"><span style="font-size:12px;color:var(--text-dim)">已有 {{ statusData?.total || 0 }} 人完成今日打卡</span><svg class="collapse-chevron" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" /></svg></div></summary><div class="collapse-body"><div class="table-wrap" style="max-height:380px"><table class="rank-table"><thead><tr><th>名次</th><th>用户名</th><th>奖励积分</th></tr></thead><tbody><tr v-if="!statusData?.leaderboard.length"><td colspan="3" style="text-align:center;color:var(--text-dim)">今天的第一份向上，正在路上。</td></tr><tr v-for="record in statusData?.leaderboard || []" :key="`${record.rank}-${record.username}`" :class="{ 'current-user': record.username === statusData?.user?.username }"><td><span v-if="record.rank <= 3" class="rank-badge" :class="`rank-${record.rank}`">{{ record.rank }}</span><template v-else>{{ record.rank }}</template></td><td>{{ record.username === statusData?.user?.username ? `你 (@${record.username})` : `@${record.username}` }}</td><td>{{ record.amount }}</td></tr></tbody></table></div></div></details>
+          <details class="card card-collapse" open><summary class="card-header-line collapse-summary"><h3 class="card-title">奖励规则 <span class="card-subtitle">根据今日打卡名次获得对应站内积分</span></h3><svg class="collapse-chevron" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" /></svg></summary><div class="collapse-body"><ul class="rules-list"><li v-for="rule in rewardRules" :key="rule.label"><span class="tier-range">{{ rule.label }}</span><span class="tier-val" :style="rule.rewarded ? undefined : { color: 'var(--text-dim)' }">{{ rule.value }}</span></li></ul><div class="quota-box"><div class="card-header-line" style="margin-bottom:10px"><h4 class="card-title" style="font-size:15px">今日 LDC 兑换额度 <span class="card-subtitle">全站每日兑换金额上限，北京时间重置</span></h4></div><div class="quota-labels"><span>今日已兑换 {{ statusData?.quota.used || '0.00' }} / {{ statusData?.quota.limit || '0.00' }} LDC</span><span style="color:var(--primary);font-weight:600">剩余 {{ statusData?.quota.remaining || '0.00' }} LDC</span></div><div class="quota-bar-track"><div class="quota-bar-fill" :style="{ width: `${quotaPercent}%` }" /></div></div></div></details>
         </div>
       </section>
     </div>
