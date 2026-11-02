@@ -211,6 +211,13 @@ button:disabled {
   display: flex;
   flex-direction: column;
 }
+#app {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
 .stage-main {
   flex: 1;
   display: flex;

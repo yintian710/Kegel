@@ -3,7 +3,7 @@ import AppLayout from './layouts/AppLayout.vue'
 </script>
 
 <template>
-  <NConfigProvider>
+  <NConfigProvider abstract>
     <NMessageProvider>
       <NDialogProvider>
         <AppLayout>
