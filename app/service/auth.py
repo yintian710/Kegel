@@ -71,9 +71,11 @@ def require_login_if_configured(user: dict | None) -> None:
         raise APIError("请先使用 LINUX DO 登录", 401)
 
 
-def require_admin(token: str | None) -> None:
-    if not Settings.ADMIN_TOKEN or not hmac.compare_digest(token or "", Settings.ADMIN_TOKEN):
-        raise APIError("管理员口令未配置或不正确", 401)
+def require_admin(user: dict | None) -> None:
+    if not user:
+        raise APIError("请先使用 LINUX DO 登录", 401)
+    if user["id"] not in Settings.ADMIN_USER_IDS:
+        raise APIError("当前账号不是管理员", 403)
 
 
 def require_trigger(token: str | None) -> None:

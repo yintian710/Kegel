@@ -11,7 +11,7 @@ router = APIRouter(prefix="/api")
 
 
 def _admin(request: Request) -> None:
-    auth.require_admin(request.headers.get("X-Admin-Token"))
+    auth.require_admin(current_user(request))
 
 
 @router.get("/admin")

@@ -32,7 +32,7 @@ SNOWFLAKE_WORKER_ID=0
 
 # 密钥与管理
 APP_SECRET=your-super-long-and-secure-random-secret-key-at-least-32-chars
-ADMIN_TOKEN=your-strong-admin-token-for-management-console
+ADMIN_USER_IDS=12345,67890
 # 敏感管理操作二选一：明文二级密码，或下文命令生成的加盐哈希
 ADMIN_SECONDARY_PASSWORD=
 ADMIN_POINTS_PASSWORD_HASH=

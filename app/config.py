@@ -57,6 +57,13 @@ def _frontend_base(value: str) -> str:
     return f"/{stripped}/" if stripped else "/"
 
 
+def _admin_user_ids(raw: str) -> frozenset[str]:
+    ids = [item.strip() for item in raw.split(",") if item.strip()]
+    if not all(item.isdigit() for item in ids):
+        raise ValueError("ADMIN_USER_IDS 须为逗号分隔的 LINUX DO 用户 ID（纯数字）")
+    return frozenset(ids)
+
+
 _load_env()
 
 _PORT = _integer("PORT", 7188, 1, 65535, "PORT 须为 1–65535 的整数")
@@ -82,7 +89,7 @@ class Settings:
     PORT = _PORT
     APP_BASE_URL = _APP_BASE_URL
     IS_LOCAL = _LOCAL
-    # 前端构建产物挂载的路径前缀；生产构建 base 为 /new/ 时填 /new/。
+    # 前端挂载的路径前缀，默认 /；登录回跳与赞助回跳 URL 据此生成。
     FRONTEND_BASE_PATH = _frontend_base(_env("FRONTEND_BASE_PATH", "/"))
 
     DATABASE_URL = _env("DATABASE_URL", "postgres://postgres:postgres@127.0.0.1:5432/kegel")
@@ -90,7 +97,7 @@ class Settings:
     SNOWFLAKE_WORKER_ID = _integer("SNOWFLAKE_WORKER_ID", 0, 0, 1023, "SNOWFLAKE_WORKER_ID 须为 0–1023 的整数")
 
     APP_SECRET = (_APP_SECRET or secrets.token_urlsafe(48)).encode()
-    ADMIN_TOKEN = _env("ADMIN_TOKEN")
+    ADMIN_USER_IDS = _admin_user_ids(_env("ADMIN_USER_IDS"))
     TRIGGER_TOKEN = _env("CHECKIN_TRIGGER_TOKEN")
     CONDITION_TOKEN = _env("CHECKIN_CONDITION_TOKEN")
     ADMIN_SECONDARY_PASSWORD = _env("ADMIN_SECONDARY_PASSWORD")
@@ -118,6 +125,6 @@ class Settings:
     @classmethod
     def secret_values(cls) -> list[str]:
         """Configured credentials that must never reach the payment log."""
-        values = [cls.LDC_CLIENT_SECRET, cls.LINUXDO_CLIENT_SECRET, cls.APP_SECRET.decode(), cls.ADMIN_TOKEN,
+        values = [cls.LDC_CLIENT_SECRET, cls.LINUXDO_CLIENT_SECRET, cls.APP_SECRET.decode(),
                   cls.TRIGGER_TOKEN, cls.CONDITION_TOKEN, cls.ADMIN_POINTS_PASSWORD_HASH]
         return [value for value in values if value]

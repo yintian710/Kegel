@@ -15,7 +15,7 @@
 
 ```bash
 cp .env.example .env
-# 编辑 .env，填写 PostgreSQL、Connect 凭据、随机密钥和管理口令
+# 编辑 .env，填写 PostgreSQL、Connect 凭据、随机密钥和管理员 LINUX DO 用户 ID
 uv sync
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f sql/schema.sql
 uv run uvicorn app.server:app --host 127.0.0.1 --port 7188
@@ -25,7 +25,7 @@ uv run uvicorn app.server:app --host 127.0.0.1 --port 7188
 
 后端健康检查为 `/health`，API 心跳为 `/api/heartbeat`；图标继续由 `/api/icon` 提供，图片文件位于 `app/assets/img/`。
 
-签到必须通过 Connect OAuth 登录，不提供演示身份。将应用回调地址配置为 `http://localhost:7188/api/auth/linuxdo/callback`，部署后改为公开 HTTPS 地址并同步 `APP_BASE_URL` 与 `LINUXDO_REDIRECT_URI`。未配置 OAuth 时无法签到。`ADMIN_TOKEN` 未设置时所有管理接口拒绝访问；触发接口同样需要独立的 `CHECKIN_TRIGGER_TOKEN`。
+签到必须通过 Connect OAuth 登录，不提供演示身份。将应用回调地址配置为 `http://localhost:7188/api/auth/linuxdo/callback`，部署后改为公开 HTTPS 地址并同步 `APP_BASE_URL` 与 `LINUXDO_REDIRECT_URI`。未配置 OAuth 时无法签到，也无法进入管理后台。管理员按登录身份识别：`ADMIN_USER_IDS` 未设置时所有管理接口拒绝访问；触发接口同样需要独立的 `CHECKIN_TRIGGER_TOKEN`。
 
 首页、公开状态及练习接口无需登录。配置完整的 OAuth 凭据后，商店、赞助页和管理页仍要求登录。访客练习不记录正式打卡、不累计排行榜、不领取奖励。登录 Cookie 有效期为 **5 天**，有效期内访问时自动续至访问后的 5 天；过期或退出后需重新登录。
 
@@ -38,7 +38,7 @@ uv run uvicorn app.server:app --host 127.0.0.1 --port 7188
 | `DATABASE_URL` | PostgreSQL 连接串，默认连接本机 `kegel` 数据库；表结构由 `sql/schema.sql` 初始化。 |
 | `SNOWFLAKE_WORKER_ID` | 雪花 ID 机器号，0–1023，默认 `0`；生产必须显式设置，多实例各不相同。 |
 | `APP_SECRET` | 会话签名密钥。生产必须设置至少 32 字符的随机值；仅本地开发允许启动时自动生成。 |
-| `ADMIN_TOKEN` | 管理接口 `X-Admin-Token` 口令；未设置则拒绝管理访问。 |
+| `ADMIN_USER_IDS` | 管理员的 LINUX DO 用户 ID，纯数字、逗号分隔；仅这些账号登录后可访问管理页与管理接口，未设置则无人可进。 |
 | `ADMIN_SECONDARY_PASSWORD` | 管理员敏感操作的明文二级密码；可与下一项二选一。 |
 | `ADMIN_POINTS_PASSWORD_HASH` | 管理员敏感操作二级密码的 PBKDF2 加盐哈希。 |
 | `LINUXDO_CLIENT_ID` / `LINUXDO_CLIENT_SECRET` | Connect OAuth 应用凭据，登录必需。 |
@@ -68,17 +68,17 @@ uv run uvicorn app.server:app --host 127.0.0.1 --port 7188
 
 签到奖励不受 LDC 兑换额度限制；例如默认首档的 1000 站内积分可正常领取，即使当日 LDC 兑换额度为 0。
 
-管理 API 使用 `X-Admin-Token`，请求体为 JSON。以下示例假定已在 shell 中设置对应口令：
+管理 API 按登录身份鉴权：请求须携带该管理员登录后的 `linuxdo_session` Cookie（可从浏览器开发者工具复制），请求体为 JSON。以下示例假定已在 shell 中设置 `ADMIN_SESSION`：
 
 ```bash
 # 立即开放今天的签到
 curl -X POST http://localhost:7188/api/admin/open \
-  -H "X-Admin-Token: $ADMIN_TOKEN" \
+  -b "linuxdo_session=$ADMIN_SESSION" \
   -H 'Content-Type: application/json' -d '{}'
 
 # 配置每日到点开放时间、步骤间隔、整数站内积分奖励和可选条件地址
 curl -X POST http://localhost:7188/api/admin/settings \
-  -H "X-Admin-Token: $ADMIN_TOKEN" \
+  -b "linuxdo_session=$ADMIN_SESSION" \
   -H 'Content-Type: application/json' \
   -d '{"deadline":"22:00","min_step_seconds":8,"reward_tiers":[{"through":10,"amount":1000},{"through":20,"amount":500},{"through":50,"amount":100}],"condition_url":"https://your-service.example/checkin-condition"}'
 
@@ -96,7 +96,7 @@ curl -X POST http://localhost:7188/api/trigger/open \
 
 ```bash
 curl -X POST http://localhost:7188/api/admin/review \
-  -H "X-Admin-Token: $ADMIN_TOKEN" \
+  -b "linuxdo_session=$ADMIN_SESSION" \
   -H 'Content-Type: application/json' \
   -d '{"user_id":"123","approved":true}'
 ```

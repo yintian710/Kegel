@@ -10,7 +10,7 @@ from urllib.parse import quote
 _PAYMENT_LOG = Path(tempfile.mkdtemp()) / "payments.jsonl"
 os.environ.update({
     "PORT": "7188", "APP_BASE_URL": "http://localhost:7188", "APP_SECRET": "test-secret-test-secret-test-secret-1234",
-    "ADMIN_TOKEN": "test-admin", "CHECKIN_TRIGGER_TOKEN": "test-trigger", "CHECKIN_CONDITION_TOKEN": "",
+    "ADMIN_USER_IDS": "9000001", "CHECKIN_TRIGGER_TOKEN": "test-trigger", "CHECKIN_CONDITION_TOKEN": "",
     "ADMIN_POINTS_PASSWORD_HASH": "", "ADMIN_SECONDARY_PASSWORD": "", "ADMIN_SECONDARY_PASSWORD_HASH": "",
     "LINUXDO_CLIENT_ID": "", "LINUXDO_CLIENT_SECRET": "", "LINUXDO_REDIRECT_URI": "",
     "LDC_DONATION_ENABLED": "false", "LDC_LIVE": "", "LDC_AUTO_DISPATCH": "", "LDC_CLIENT_ID": "",
@@ -31,6 +31,7 @@ from app.service import auth, checkin
 from app.utils import timeutil
 
 SECONDARY_SECRET = '二级校验"&测试'
+ADMIN_USER_ID = 9000001  # 与上方 ADMIN_USER_IDS 一致；admin=True 的请求以此账号登录
 _SALT = "0123456789abcdef0123456789abcdef"
 SECONDARY_HASH = "pbkdf2_sha256$600000$" + _SALT + "$" + hashlib.pbkdf2_hmac(
     "sha256", SECONDARY_SECRET.encode("utf-8"), bytes.fromhex(_SALT), 600000).hex()
@@ -87,13 +88,13 @@ class Client:
 
     def _headers(self, user, admin, headers) -> dict:
         result = {}
+        if admin:
+            user = ADMIN_USER_ID
+            result["X-Secondary-Password"] = quote(SECONDARY_SECRET)
         if user is not None:
             token = auth.sign_payload({"purpose": "session", "id": str(user), "username": f"user{user}",
                                        "exp": self.clock.value + 86400 * 7})
             result["Cookie"] = f"{auth.SESSION_COOKIE}={token}"
-        if admin:
-            result["X-Admin-Token"] = "test-admin"
-            result["X-Secondary-Password"] = quote(SECONDARY_SECRET)
         result.update(headers or {})
         return result
 

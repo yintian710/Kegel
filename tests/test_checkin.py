@@ -6,7 +6,7 @@ import pytest
 
 from app.infrastructure.database import execute, fetch
 from app.service import auth, checkin
-from tests.conftest import SECONDARY_SECRET, START
+from tests.conftest import ADMIN_USER_ID, SECONDARY_SECRET, START
 
 pytestmark = pytest.mark.asyncio(loop_scope="session")
 
@@ -39,6 +39,10 @@ async def complete(client, user):
 async def test_admin_and_trigger_guards(client):
     assert (await client.request("/api/admin"))[0] == 401
     assert (await client.request("/api/admin/open", {}))[0] == 401
+    # 已登录但不在管理员名单：拒绝，且口令请求头不再具备任何效力。
+    assert (await client.request("/api/admin", user=1))[0] == 403
+    assert (await client.request("/api/admin/open", {}, user=1, headers={"X-Admin-Token": "anything"}))[0] == 403
+    assert (await client.request("/api/admin", user=ADMIN_USER_ID))[0] == 200
     assert (await client.request("/api/trigger/open", {}))[0] == 401
     assert (await client.request("/api/trigger/open", {}, headers={"X-Trigger-Token": "test-trigger"}))[0] == 200
     status = (await client.request("/api/status"))[1]
@@ -213,7 +217,7 @@ async def test_invalid_settings_are_rejected_without_partial_save(client):
 
 async def test_reward_tiers_need_secondary_secret(client):
     body = {"reward_tiers": [{"through": 10, "amount": 1000}]}
-    code, _ = await client.request("/api/admin/settings", body, headers={"X-Admin-Token": "test-admin"})
+    code, _ = await client.request("/api/admin/settings", body, user=ADMIN_USER_ID)
     assert code == 403
     code, _ = await client.request("/api/admin/settings", {**body, "secondary_secret": "wrong"}, admin=True)
     assert code == 403

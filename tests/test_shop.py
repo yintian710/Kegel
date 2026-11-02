@@ -7,7 +7,7 @@ import pytest
 from app.config import Settings
 from app.infrastructure.database import execute, fetch
 from app.service import catalog
-from tests.conftest import SECONDARY_SECRET
+from tests.conftest import ADMIN_USER_ID, SECONDARY_SECRET
 
 pytestmark = pytest.mark.asyncio(loop_scope="session")
 
@@ -31,7 +31,7 @@ def buy(client, user, product_id, request_id=None):
 
 
 async def test_product_crud_requires_secondary_secret_and_lists_limits(client):
-    code, _ = await client.request("/api/admin/products", {"name": "x", "points_price": 1, "is_active": True}, headers={"X-Admin-Token": "test-admin"})
+    code, _ = await client.request("/api/admin/products", {"name": "x", "points_price": 1, "is_active": True}, user=ADMIN_USER_ID)
     assert code == 403
     product_id = await make_product(client, "2.50", 500, user_daily_limit=1, total_daily_limit=5)
     code, listed = await client.request("/api/shop", user=1)
