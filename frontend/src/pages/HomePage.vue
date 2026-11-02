@@ -39,7 +39,8 @@ const remaining = computed(() => activeSession.value ? Math.max(0, Math.ceil((re
 const targetPrompt = computed<string | null>(() => {
   if (!started.value) return null
   if (!activeSession.value) return '开始第 1 次？'
-  return `开始第 ${Math.min(step.value + 2, repetitions.value)} 次？`
+  if (step.value >= repetitions.value - 1) return '最后一次，加油！'
+  return `开始第 ${step.value + 2} 次？`
 })
 const fadeSeconds = computed(() => (Number(activeSession.value?.interval_seconds ?? activeSession.value?.min_seconds ?? statusData.value?.min_step_seconds) || 2) / 2)
 const hint = computed(() => {
