@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import time
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -104,13 +104,47 @@ async def open_today(reason: str) -> None:
         await execute("UPDATE days SET opened_at=$1,open_reason=$2 WHERE day=$3 AND opened_at IS NULL", now, reason, today)
 
 
+
+def _previous_workday(value: date) -> date:
+    value -= timedelta(days=1)
+    while value.weekday() >= 5:
+        value -= timedelta(days=1)
+    return value
+
+
+async def _workday_streak(user_id: str, day: str) -> int:
+    current = date.fromisoformat(day)
+    completed: set[date] = set()
+    for row in await fetch("SELECT day FROM entries WHERE user_id=$1 AND day<$2 ORDER BY day DESC", user_id, day):
+        completed_day = date.fromisoformat(row["day"])
+        if completed_day.weekday() < 5:
+            completed.add(completed_day)
+
+    streak = 1 if current.weekday() < 5 else 0
+    expected = _previous_workday(current)
+    while expected in completed:
+        streak += 1
+        expected = _previous_workday(expected)
+    return streak
+
+
+def _streak_bonus_percent(streak_days: int) -> int:
+    return min(max(streak_days - 1, 0), 100)
+
+
+def _apply_streak_bonus(amount: int, bonus_percent: int) -> int:
+    return amount * (100 + bonus_percent) // 100
+
 # ── 视图 ──────────────────────────────────────────────────────────────────────
 
-def entry_view(row: dict | None) -> dict | None:
+def entry_view(row: dict | None, streak_days: int | None = None) -> dict | None:
     if row is None:
         return None
-    return {**row, "completed_at": timeutil.iso_time(row["completed_at"]),
-            "claimed_at": timeutil.iso_time(row["claimed_at"])}
+    result = {**row, "completed_at": timeutil.iso_time(row["completed_at"]),
+              "claimed_at": timeutil.iso_time(row["claimed_at"])}
+    if streak_days is not None:
+        result.update(streak_days=streak_days, reward_bonus_percent=_streak_bonus_percent(streak_days))
+    return result
 
 
 async def _entry(day: str, user_id: str) -> dict | None:
@@ -128,6 +162,7 @@ async def status_view(user: dict | None, now: float, subject: str = "") -> dict:
     pending = await review.has_pending_review(day["day"], identity)
     if session and not session["eligible"] and user and day["opened_at"] is not None and not pending:
         session = None
+    streak_days = await _workday_streak(identity, day["day"]) if entry else None
     return {"user": user, "day": day["day"], "is_open": day["opened_at"] is not None,
             "opened_at": timeutil.iso_time(day["opened_at"]), "open_reason": day["open_reason"],
             "deadline": config["deadline"], "timezone": Settings.SITE_TZ_NAME,
@@ -135,7 +170,7 @@ async def status_view(user: dict | None, now: float, subject: str = "") -> dict:
             "wallet": await credits.wallet_view(identity) if user else None,
             "quota": await catalog.quota_view(day["day"]), "oauth_ready": Settings.oauth_ready(),
             "total": (await fetch_one("SELECT COUNT(*) AS n FROM entries WHERE day=$1", day["day"]))["n"],
-            "entry": entry_view(entry), "session": practice.view(session, now), "review": pending,
+            "entry": entry_view(entry, streak_days), "session": practice.view(session, now), "review": pending,
             "leaderboard": await fetch("SELECT rank,username,amount,reward_status FROM entries "
                                        "WHERE day=$1 ORDER BY rank LIMIT 50", day["day"])}
 
@@ -216,12 +251,15 @@ async def complete_session(user: dict | None, visitor: str, body: dict) -> dict:
         today = timeutil.day_key(now)
         row = await practice.complete(identity["id"], today, token, now)
         entry = None
+        streak_days = None
         if user:
             pending = await review.has_pending_review(today, user["id"])
             if row["eligible"] and not pending:
                 rank = (await fetch_one("SELECT COUNT(*)+1 AS n FROM entries WHERE day=$1", today))["n"]
-                amount = next((tier["amount"] for tier in (await get_settings())["reward_tiers"]
-                               if rank <= tier["through"]), 0)
+                base_amount = next((tier["amount"] for tier in (await get_settings())["reward_tiers"]
+                                    if rank <= tier["through"]), 0)
+                streak_days = await _workday_streak(user["id"], today)
+                amount = _apply_streak_bonus(base_amount, _streak_bonus_percent(streak_days))
                 await execute("""INSERT INTO entries(day,user_id,username,rank,amount,completed_at,reward_status,flow_id)
                     VALUES ($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT(day,user_id) DO UPDATE SET
                     flow_id=excluded.flow_id,completed_at=excluded.completed_at
@@ -229,7 +267,9 @@ async def complete_session(user: dict | None, visitor: str, body: dict) -> dict:
                               today, user["id"], user["username"], rank, amount, row["updated_at"],
                               "unclaimed" if amount > 0 else "none", row["flow_id"])
             entry = await _entry(today, user["id"])
-        return {"session": practice.view(row, now), "entry": entry_view(entry)}
+            if entry and streak_days is None:
+                streak_days = await _workday_streak(user["id"], today)
+        return {"session": practice.view(row, now), "entry": entry_view(entry, streak_days)}
 
 
 async def claim(user: dict) -> dict:
@@ -246,7 +286,8 @@ async def claim(user: dict) -> dict:
             await execute("UPDATE entries SET reward_status='credited',claimed_at=$1 WHERE day=$2 AND user_id=$3",
                           now, today, user["id"])
             row = await _entry(today, user["id"])
-        return {"entry": entry_view(row), "wallet": await credits.wallet_view(user["id"]),
+        streak_days = await _workday_streak(user["id"], today)
+        return {"entry": entry_view(row, streak_days), "wallet": await credits.wallet_view(user["id"]),
                 "quota": await catalog.quota_view(today)}
 
 

@@ -20,6 +20,8 @@ export interface CheckinEntry {
   claimed_at: string | null
   reward_status: 'unclaimed' | 'credited' | 'none'
   flow_id: string | null
+  streak_days?: number
+  reward_bonus_percent?: number
 }
 
 export interface Session {

@@ -85,7 +85,9 @@
     "user_id": "123",
     "username": "alice",
     "rank": 2,
-    "amount": 500,
+    "amount": 505,
+    "streak_days": 2,
+    "reward_bonus_percent": 1,
     "reward_status": "unclaimed",
     "completed_at": "2026-10-27T08:05:00+08:00",
     "claimed_at": null
@@ -94,12 +96,14 @@
   "review": null,
   "leaderboard": [
     { "rank": 1, "username": "bob", "amount": 1000, "reward_status": "credited" },
-    { "rank": 2, "username": "alice", "amount": 500, "reward_status": "unclaimed" }
+    { "rank": 2, "username": "alice", "amount": 505, "reward_status": "unclaimed" }
   ]
   },
   "msg": "success"
 }
 ```
+
+`entry.amount` 是连续工作日加成后的最终整数奖励；`streak_days` 是当前连续工作日天数，`reward_bonus_percent` 从第 2 天起按每天 `1%` 增加并在 `100%` 封顶。周末不增加天数，也不中断连续记录；小数积分向下取整。
 
 ### 2.2 页面载入访问打点
 - **路径**：`POST /api/visit`

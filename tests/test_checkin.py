@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import date, timedelta
 
 import pytest
 
@@ -79,6 +80,46 @@ async def test_full_checkin_flow_awards_rank_and_claims_once(client):
     repeat = await complete(client, 1)
     assert repeat["rank"] == 1
     assert (await client.request("/api/status", user=2))[1]["total"] == 1
+
+async def test_workday_streak_increases_reward_and_ignores_weekends(client):
+    await execute("INSERT INTO entries(day,user_id,username,rank,amount,completed_at,reward_status) VALUES "
+                  "('2026-10-22','7','user7',1,1000,1,'credited'),"
+                  "('2026-10-23','7','user7',1,1000,1,'credited'),"
+                  "('2026-10-22','8','user8',2,1000,1,'credited')")
+    await open_day(client)
+
+    continued = await complete(client, 7)
+    assert continued["streak_days"] == 3
+    assert continued["reward_bonus_percent"] == 2
+    assert continued["amount"] == 1020
+    status = (await client.request("/api/status", user=7))[1]
+    assert status["entry"]["streak_days"] == 3
+    assert status["entry"]["reward_bonus_percent"] == 2
+    claimed = (await client.request("/api/claim", {}, user=7))[1]
+    assert claimed["wallet"]["balance"] == 1020
+
+    reset = await complete(client, 8)
+    assert reset["streak_days"] == 1
+    assert reset["reward_bonus_percent"] == 0
+    assert reset["amount"] == 1000
+
+
+async def test_workday_streak_reward_caps_at_one_hundred_percent(client):
+    current = date(2026, 10, 26)
+    previous_days = []
+    while len(previous_days) < 100:
+        current -= timedelta(days=1)
+        if current.weekday() < 5:
+            previous_days.append(current.isoformat())
+    for day in previous_days:
+        await execute("INSERT INTO entries(day,user_id,username,rank,amount,completed_at,reward_status) "
+                      "VALUES ($1,'9','user9',1,1000,1,'credited')", day)
+
+    await open_day(client)
+    entry = await complete(client, 9)
+    assert entry["streak_days"] == 101
+    assert entry["reward_bonus_percent"] == 100
+    assert entry["amount"] == 2000
 
 
 @pytest.mark.parametrize("prior,amount", [(9, 1000), (19, 500), (49, 100), (50, 0)])

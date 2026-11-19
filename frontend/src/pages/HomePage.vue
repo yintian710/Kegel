@@ -283,6 +283,7 @@ onBeforeUnmount(() => { unmounted = true; if (timer) clearInterval(timer); if (p
           <div class="completion-info">
             <h2 class="completion-title">{{ completionSummary.titlePrefix }}<span class="rank-num">{{ completionSummary.rank }}</span>{{ completionSummary.titleSuffix }}</h2>
             <p class="completion-reward-text">{{ completionSummary.rewardPrefix }}<b>{{ completionSummary.amount }}</b>{{ completionSummary.rewardSuffix }}</p>
+            <p v-if="entry" class="completion-streak-text">已连续 <b>{{ entry.streak_days ?? 0 }}</b> 天打卡（只计入工作日），每多一天获取积分提升 1%，最高 100%</p>
             <div class="completion-actions">
               <button v-if="entry ? entry.reward_status === 'unclaimed' : completionKind !== 'closed' && completionKind !== 'review'" class="btn-primary" type="button" :disabled="busy || (!entry && !statusData?.oauth_ready)" @click="claimReward">{{ entry ? (busy ? '正在领取…' : '领取站内积分') : statusData?.oauth_ready ? 'LINUX DO 登录参与排名' : '登录暂未配置' }}</button>
               <RouterLink class="btn-secondary" to="/practice" :query="preferenceQuery()">{{ ft('提肛练习') }}</RouterLink>
