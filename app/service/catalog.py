@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import json
 import re
 import secrets
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from app.common.linuxdo import dispatch_ldc
+from app.common.payment_log import payment_log
 from app.config import Settings
 from app.infrastructure.database import execute, fetch, fetch_one, write_txn
 from app.infrastructure.database.schemas import ShopProduct, ShopPurchase
@@ -18,6 +20,7 @@ _REQUEST_ID_RE = re.compile(r"[A-Za-z0-9_-]{16,128}")
 _HOLDING = "('pending', 'success', 'simulated', 'uncertain')"
 _PRODUCT_FIELDS = {"id", "category", "name", "description", "points_price", "ldc_amount", "user_daily_limit",
                    "total_daily_limit", "is_active", "secondary_secret", "secondary_password"}
+NO_PAYOUT_KEY = "no_payout_user_ids"
 
 
 def parse_ldc_amount(value: Any) -> str:
@@ -131,8 +134,16 @@ async def user_purchases(user_id: str) -> list[dict]:
         "SELECT * FROM shop_purchases WHERE user_id=$1 ORDER BY created_at DESC LIMIT 50", user_id))
 
 
+async def no_payout_ids() -> frozenset[str]:
+    """Admin-configured user IDs whose redemptions are recorded as delivered without calling Credit."""
+    row = await fetch_one("SELECT value FROM checkin_settings WHERE key=$1", NO_PAYOUT_KEY)
+    return frozenset(json.loads(row["value"])) if row else frozenset()
+
+
 async def all_purchases() -> list[dict]:
-    return _purchase_views(await fetch("SELECT * FROM shop_purchases ORDER BY created_at DESC LIMIT 200"))
+    flagged = await no_payout_ids()
+    rows = _purchase_views(await fetch("SELECT * FROM shop_purchases ORDER BY created_at DESC LIMIT 200"))
+    return [{**row, "no_payout": row["user_id"] in flagged} for row in rows]
 
 
 async def daily_ldc_used(today: str) -> Decimal:
@@ -206,7 +217,13 @@ async def purchase_product(user: dict, product_id: Any, request_id: Any) -> dict
     if not is_new:
         return _outcome(order)
 
-    status, trade_no, error = await dispatch_ldc(order["order_no"], user, order["ldc_amount"])
+    if user["id"] in await no_payout_ids():
+        # 不发货名单：不调用 Credit，订单按成功落库，返回与真实发货同形态的 18 位流水号；仅支付日志留痕。
+        status, trade_no, error = "success", str(secrets.randbelow(9 * 10**17) + 10**17), ""
+        payment_log("ldc.withheld", order_no=order["order_no"], user_id=user["id"],
+                    amount=order["ldc_amount"], trade_no=trade_no)
+    else:
+        status, trade_no, error = await dispatch_ldc(order["order_no"], user, order["ldc_amount"])
 
     async with write_txn():
         if status in ("success", "simulated"):

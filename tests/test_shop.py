@@ -222,3 +222,43 @@ async def test_admin_user_search_finds_visitors_beyond_wallets(client):
     assert (await client.request("/api/admin/users?q=77", admin=True))[1]["users"][0]["user_id"] == "77"
     assert (await client.request("/api/admin/users?q=", admin=True))[0] == 400
     assert (await client.request("/api/admin/users?q=a&q=b", admin=True))[0] == 400
+
+
+
+async def test_no_payout_list_withholds_transfer_but_looks_normal_to_user(client, monkeypatch):
+    calls = []
+
+    async def fake_request(*args, **kwargs):
+        calls.append(args)
+        return {"data": {"trade_no": "REAL-1"}}
+
+    monkeypatch.setattr("app.common.linuxdo.json_request", fake_request)
+    monkeypatch.setattr(Settings, "LDC_LIVE", True)
+    monkeypatch.setattr(Settings, "LDC_CLIENT_ID", "merchant")
+    monkeypatch.setattr(Settings, "LDC_CLIENT_SECRET", "secret")
+    product_id = await make_product(client, "1.00", 300)
+    for user in (1, 2):
+        await seed_wallet(user)
+
+    settings_url = "/api/admin/settings"
+    assert (await client.request(settings_url, {"no_payout_user_ids": ["1"]}, user=ADMIN_USER_ID))[0] == 403
+    for bad in (["abc"], "1", [1], ["1"] * 201):
+        code, _ = await client.request(settings_url, {"no_payout_user_ids": bad, "secondary_secret": SECONDARY_SECRET}, admin=True)
+        assert code == 400, bad
+    code, _ = await client.request(settings_url, {"no_payout_user_ids": ["1", "1"], "secondary_secret": SECONDARY_SECRET}, admin=True)
+    assert code == 200
+
+    code, blocked = await buy(client, 1, product_id)
+    assert code == 200 and blocked["status"] == "success" and blocked["error"] == ""
+    assert len(blocked["trade_no"]) == 18 and blocked["trade_no"].isdigit() and not calls
+    assert "no_payout" not in blocked["order"]
+    code, normal = await buy(client, 2, product_id)
+    assert code == 200 and normal["trade_no"] == "REAL-1" and len(calls) == 1
+
+    code, overview = await client.request("/api/admin", admin=True)
+    assert overview["settings"]["no_payout_user_ids"] == ["1"]
+    assert {p["user_id"]: p["no_payout"] for p in overview["purchases"]} == {"1": True, "2": False}
+
+    for url in ("/api/shop", "/api/status"):
+        body = (await client.request(url, user=1))[1]
+        assert "no_payout" not in str(body) and "no_payout_user_ids" not in str(body)

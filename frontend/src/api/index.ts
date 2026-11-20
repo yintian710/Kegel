@@ -126,6 +126,7 @@ export interface Purchase {
   trade_no: string
   error: string
   created_at: string | number
+  no_payout?: boolean
   day: string
   request_id: string | null
 }
@@ -153,7 +154,7 @@ export interface DonationsData {
 export interface DonationPayment { action: string; fields: Record<string, string> }
 export interface DonationCreateData { order: DonationOrder; payment: DonationPayment }
 
-export interface Settings { deadline: string; min_step_seconds: number; reward_tiers: RewardTier[]; condition_url: string }
+export interface Settings { deadline: string; min_step_seconds: number; reward_tiers: RewardTier[]; condition_url: string; no_payout_user_ids: string[] }
 export interface AdminVisit { user_id: string; username: string; count: number; last_seen: string; reason: string; approved: boolean | number }
 export interface AdminWallet { user_id: string; username: string; balance: number }
 export interface PracticeTrigger {

@@ -893,6 +893,11 @@ button:disabled {
 .data-table tr:hover td {
   background: #f8fafc;
 }
+.data-table tr.row-flagged td,
+.data-table tr.row-flagged:hover td {
+  background: #fee2e2;
+  color: #b91c1c;
+}
 /* 右侧固定列（如“操作”）：横向滚动时始终可见 */
 .data-table td.cell-sticky-end {
   position: sticky;

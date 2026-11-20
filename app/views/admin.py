@@ -41,7 +41,7 @@ async def open_today(request: Request):
 async def save_settings(request: Request):
     body = await json_body(request)
     _admin(request)
-    if "reward_tiers" in body:
+    if "reward_tiers" in body or catalog.NO_PAYOUT_KEY in body:
         auth.verify_secondary_secret(auth.secondary_secret_from(body, request.headers))
     await checkin.save_settings(body)
     return good()

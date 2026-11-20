@@ -317,6 +317,8 @@
 
 基础参数保存只提交 `deadline`、`min_step_seconds` 和 `condition_url`，验证管理员身份即可，不要求二级密码。修改 `reward_tiers` 仍须验证二级密码；基础参数表单不得附带未修改的奖励配置。
 
+`no_payout_user_ids`（字符串数组，纯数字用户 ID，至多 200 个）同样走 `POST /api/admin/settings`，须验证二级密码。名单内用户兑换时不调用 Credit 转账，订单按 `success` 落库并返回 18 位数字流水号；`GET /api/admin` 的 `settings.no_payout_user_ids` 返回名单，`purchases[].no_payout` 标记名单内用户的订单。这两个字段仅管理接口返回，用户侧接口不含。
+
 加积分说明：
 
 - `ADMIN_POINTS_PASSWORD_HASH` 存储 PBKDF2-HMAC-SHA256 加盐哈希，格式及生成命令见部署文档。未配置或格式错误返回 `503`；二级密码错误返回 `403`，不影响登录状态。未登录仍返回 `401`。

@@ -19,6 +19,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
                      {"through": 20, "amount": 500},
                      {"through": 50, "amount": 100}],
     "condition_url": "",
+    catalog.NO_PAYOUT_KEY: [],
 }
 
 
@@ -76,6 +77,12 @@ def validate_settings(body: dict[str, Any]) -> dict[str, Any]:
                       or parsed_url.username or parsed_url.password):
             raise APIError("条件 API 必须是 HTTP(S) 地址，认证密钥请配置环境变量")
         result["condition_url"] = value
+    if catalog.NO_PAYOUT_KEY in body:
+        ids = body[catalog.NO_PAYOUT_KEY]
+        if not isinstance(ids, list) or len(ids) > 200 or not all(
+                isinstance(item, str) and item.isascii() and item.isdecimal() and len(item) <= 20 for item in ids):
+            raise APIError("不发货名单须为至多 200 个纯数字 LINUX DO 用户 ID")
+        result[catalog.NO_PAYOUT_KEY] = list(dict.fromkeys(ids))
     return result
 
 
