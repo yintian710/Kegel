@@ -4,8 +4,9 @@ import AutoImport from 'unplugin-auto-import/vite'
 import Components from 'unplugin-vue-components/vite'
 import { NaiveUiResolver } from 'unplugin-vue-components/resolvers'
 
-export default defineConfig(({ mode }) => ({
-  base: '/',
+export default defineConfig(() => ({
+  // 默认部署在站点根路径；测试环境等子路径部署时用 VITE_BASE=/box/ 覆盖。
+  base: process.env.VITE_BASE || '/',
   plugins: [
     vue(),
     AutoImport({

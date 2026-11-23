@@ -16,6 +16,7 @@ class ShopProduct(Model):
     user_daily_limit = fields.IntField(default=0)
     total_daily_limit = fields.IntField(default=0)
     is_active = fields.IntField()
+    draw_count = fields.IntField(default=0)
 
     class Meta:
         table = "shop_products"
@@ -36,6 +37,7 @@ class ShopPurchase(Model):
     created_at = fields.FloatField()
     day = fields.TextField()
     request_id = fields.TextField(null=True)
+    draw_count = fields.IntField(default=0)
 
     class Meta:
         table = "shop_purchases"

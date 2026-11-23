@@ -26,7 +26,8 @@ function isEnvelope(value: unknown): value is ApiEnvelope<unknown> {
 }
 
 export const http = axios.create({
-  baseURL: '/api',
+  // 默认 /api；子路径部署（如测试环境 /box）用 VITE_API_BASE=/box/api 覆盖。
+  baseURL: import.meta.env.VITE_API_BASE || '/api',
   withCredentials: true,
   timeout: 30_000,
 })

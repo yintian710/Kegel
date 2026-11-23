@@ -239,13 +239,16 @@ export const admin = {
   reconcilePurchase: (orderNo: string, input: ReconcileInput, config?: RequestConfig) => post<ReconcileData>(`/admin/purchases/${encodeURIComponent(orderNo)}/reconcile`, input, config),
 }
 
+// 与 http.ts 一致的 API 前缀；子路径部署（如测试环境 /box）用 VITE_API_BASE=/box/api 覆盖。
+export const API_BASE = (import.meta.env.VITE_API_BASE || '/api').replace(/\/$/, '')
+
 const LOGIN_PATHS: Record<string, true> = { '/': true, '/practice': true, '/shop': true, '/donate': true, '/admin': true }
 export function loginUrl(next = '/'): string {
   const safeNext = LOGIN_PATHS[next] ? next : '/'
-  return `/api/auth/linuxdo/start?${new URLSearchParams({ next: safeNext })}`
+  return `${API_BASE}/auth/linuxdo/start?${new URLSearchParams({ next: safeNext })}`
 }
 export function logoutUrl(): string {
-  return '/api/auth/logout'
+  return `${API_BASE}/auth/logout`
 }
 
 export { ApiError, http } from './http'

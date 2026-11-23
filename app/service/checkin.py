@@ -9,7 +9,7 @@ from urllib.parse import urlsplit
 from app.common.http_client import json_request
 from app.config import Settings
 from app.infrastructure.database import execute, fetch, fetch_one, write_txn
-from app.service import auth, catalog, credits, practice, review
+from app.service import auth, catalog, credits, practice, review, titles
 from app.utils import timeutil
 from app.utils.exceptions import APIError
 
@@ -20,6 +20,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
                      {"through": 50, "amount": 100}],
     "condition_url": "",
     catalog.NO_PAYOUT_KEY: [],
+    "ticket_reward_tiers": [],
 }
 
 
@@ -68,6 +69,26 @@ def validate_settings(body: dict[str, Any]) -> dict[str, Any]:
             normalized.append({"through": through, "amount": amount})
             previous = through
         result["reward_tiers"] = normalized
+    if "ticket_reward_tiers" in body:
+        tiers = body["ticket_reward_tiers"]
+        if not isinstance(tiers, list) or len(tiers) > 20:
+            raise APIError("送券档位需为至多 20 条的列表")
+        normalized = []
+        for tier in tiers:
+            if not isinstance(tier, dict):
+                raise APIError("送券档位格式错误")
+            through = tier.get("through")
+            ttype = tier.get("ticket_type")
+            count = tier.get("count")
+            if type(through) is not int or not 1 <= through <= 100000:
+                raise APIError("送券档位截止名次须为 1–100000 的整数")
+            if ttype not in titles.TICKET_TYPES:
+                raise APIError("送券档位的券类型须为 single / ten / hundred")
+            if type(count) is not int or not 1 <= count <= 1000:
+                raise APIError("送券数量须为 1–1000 的整数")
+            normalized.append({"through": through, "ticket_type": ttype, "count": count})
+        normalized.sort(key=lambda item: item["through"])
+        result["ticket_reward_tiers"] = normalized
     if "condition_url" in body:
         value = body["condition_url"]
         if not isinstance(value, str) or len(value) > 2048:
@@ -274,6 +295,8 @@ async def complete_session(user: dict | None, visitor: str, body: dict) -> dict:
                               today, user["id"], user["username"], rank, amount, row["updated_at"],
                               "unclaimed" if amount > 0 else "none", row["flow_id"])
             entry = await _entry(today, user["id"])
+            if entry and not pending:
+                await titles.grant_checkin_tickets(user["id"], int(entry["rank"]), today, now)
             if entry and streak_days is None:
                 streak_days = await _workday_streak(user["id"], today)
         return {"session": practice.view(row, now), "entry": entry_view(entry, streak_days)}

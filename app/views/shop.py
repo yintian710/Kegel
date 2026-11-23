@@ -21,7 +21,7 @@ async def shop(request: Request):
                  "wallet": await credits.wallet_view(uid) if user else None,
                  "quota": await catalog.quota_view(today),
                  "ledger": await credits.ledger_view(uid) if user else [],
-                 "products": await catalog.list_products(user_id=uid, today=today),
+                 "products": await catalog.list_products(user_id=uid, today=today, category="LDC"),
                  "purchases": await catalog.user_purchases(uid) if user else []})
 
 

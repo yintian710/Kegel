@@ -2,8 +2,12 @@
 .env
 .env.*
 !.env.example
+!.env.box.example
 *.pem
 *.key
+
+# 本地临时目录（测试/构建临时文件）
+.tmp/
 
 # 本地数据库、日志及备份（保留旧 SQLite 数据的忽略规则）
 *.db

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { loginUrl, logoutUrl } from '../api'
+import { API_BASE, loginUrl, logoutUrl } from '../api'
 import { ft, preferenceQuery } from '../composables/usePreferences'
 import { useIdentity } from '../composables/useIdentity'
 
@@ -39,7 +39,7 @@ onMounted(async () => {
 <template>
   <header class="site-header" data-site-navigation>
     <RouterLink class="site-brand" :to="{ path: '/', query: carriedQuery }" data-interactive>
-      <img class="brand-logo" :src="'/api/icon?size=48'" :alt="ft('提肛打卡 Logo')" />
+      <img class="brand-logo" :src="API_BASE + '/icon?size=48'" :alt="ft('提肛打卡 Logo')" />
       <span>{{ ft('提肛打卡') }}</span><span class="brand-badge">DAILY</span>
     </RouterLink>
     <nav class="site-nav" aria-label="主导航" data-interactive>

@@ -37,11 +37,17 @@ SECONDARY_HASH = "pbkdf2_sha256$600000$" + _SALT + "$" + hashlib.pbkdf2_hmac(
     "sha256", SECONDARY_SECRET.encode("utf-8"), bytes.fromhex(_SALT), 600000).hex()
 START = 1792972800.0  # Asia/Shanghai 2026-10-26 08:00
 TABLES = ("checkin_settings, days, visits, reviews, sessions, entries, points_wallets, points_ledger, "
-          "practice_triggers, training_records, shop_products, shop_purchases, donation_orders, donation_settlements")
+          "practice_triggers, training_records, shop_products, shop_purchases, donation_orders, donation_settlements, "
+          "title_defs, title_content, user_titles, user_title_state, title_draw_batches, title_draws, "
+          "title_crafts, title_ticket_ledger, title_config")
 
 
 @pytest.fixture(scope="session")
 def postgres(tmp_path_factory):
+    external = os.environ.get("TEST_DATABASE_URL")
+    if external:  # 本地无法起 pgserver 时，指向外部临时 PostgreSQL（如开发机上的实例）
+        yield external
+        return
     server = pgserver.get_server(tmp_path_factory.mktemp("pgdata"))
     yield server.get_uri().replace("postgresql://", "postgres://", 1)
     server.cleanup()

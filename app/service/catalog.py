@@ -19,7 +19,7 @@ _AMOUNT_RE = re.compile(r"^(0|[1-9][0-9]{0,4})(?:\.([0-9]{1,2}))?$")
 _REQUEST_ID_RE = re.compile(r"[A-Za-z0-9_-]{16,128}")
 _HOLDING = "('pending', 'success', 'simulated', 'uncertain')"
 _PRODUCT_FIELDS = {"id", "category", "name", "description", "points_price", "ldc_amount", "user_daily_limit",
-                   "total_daily_limit", "is_active", "secondary_secret", "secondary_password"}
+                   "total_daily_limit", "is_active", "draw_count", "secondary_secret", "secondary_password"}
 NO_PAYOUT_KEY = "no_payout_user_ids"
 
 
@@ -51,9 +51,16 @@ def _product_view(row: dict, total_bought: int | None = None, user_bought: int |
     return result
 
 
-async def list_products(*, user_id: str | None = None, today: str = "", include_inactive: bool = False) -> list[dict]:
-    rows = await fetch("SELECT * FROM shop_products" + ("" if include_inactive else " WHERE is_active=1")
-                       + " ORDER BY id DESC")
+async def list_products(*, user_id: str | None = None, today: str = "", include_inactive: bool = False,
+                        category: str | None = None) -> list[dict]:
+    clauses, params = [], []
+    if not include_inactive:
+        clauses.append("is_active=1")
+    if category is not None:
+        params.append(category)
+        clauses.append(f"category=${len(params)}")
+    where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
+    rows = await fetch("SELECT * FROM shop_products" + where + " ORDER BY id DESC", *params)
     if not today:
         return [_product_view(row) for row in rows]
     totals = {row["product_id"]: row["n"] for row in await fetch(
@@ -88,8 +95,8 @@ async def save(body: dict) -> dict:
     if set(body) - _PRODUCT_FIELDS:
         raise APIError("包含不支持的商品字段")
     category = str(body.get("category", "LDC")).strip()
-    if category != "LDC":
-        raise APIError("目前仅支持 LDC 品类商品")
+    if category not in ("LDC", "TICKET"):
+        raise APIError("商品品类仅支持 LDC 或 TICKET")
     name = body.get("name")
     if not isinstance(name, str) or not 1 <= len(name.strip()) <= 80:
         raise APIError("商品名称需为 1–80 字")
@@ -100,15 +107,25 @@ async def save(body: dict) -> dict:
         price = credits.parse_points(body.get("points_price"))
     except ValueError as exc:
         raise APIError(str(exc)) from None
-    ldc_amount = parse_ldc_amount(body.get("ldc_amount", "1.00"))
-    user_limit = _limit(body, "user_daily_limit", "单人每日限购")
-    total_limit = _limit(body, "total_daily_limit", "全站每日限购")
+    if category == "TICKET":
+        try:
+            draw_count = int(body.get("draw_count"))
+        except (TypeError, ValueError):
+            raise APIError("券面额须为 1/10/100") from None
+        if draw_count not in (1, 10, 100):
+            raise APIError("券面额须为 1/10/100")
+        ldc_amount, user_limit, total_limit = "0.00", 0, 0
+    else:
+        draw_count = 0
+        ldc_amount = parse_ldc_amount(body.get("ldc_amount", "1.00"))
+        user_limit = _limit(body, "user_daily_limit", "单人每日限购")
+        total_limit = _limit(body, "total_daily_limit", "全站每日限购")
     active = body.get("is_active")
     if type(active) is not bool:
         raise APIError("需指定商品是否上架")
-    values = {"category": category, "name": name.strip(), "description": description.strip(), "points_price": price,
-              "ldc_amount": ldc_amount, "user_daily_limit": user_limit, "total_daily_limit": total_limit,
-              "is_active": int(active)}
+    values = {"category": category, "name": name.strip(), "description": description.strip(),
+              "points_price": price, "ldc_amount": ldc_amount, "user_daily_limit": user_limit,
+              "total_daily_limit": total_limit, "is_active": int(active), "draw_count": draw_count}
     async with write_txn():
         if body.get("id") is None:
             product_id = (await ShopProduct.create(**values)).id
@@ -177,6 +194,8 @@ async def _reserve(user: dict, product_id: int, today: str, now: float, request_
         product = await fetch_one("SELECT * FROM shop_products WHERE id=$1", product_id)
         if not product or not product["is_active"]:
             raise APIError("商品不存在或已下架", 404)
+        if product["category"] != "LDC":
+            raise APIError("该商品不是 LDC 兑换品", 400)
         total_limit, user_limit = product["total_daily_limit"], product["user_daily_limit"]
         if total_limit > 0:
             bought = (await fetch_one(

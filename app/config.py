@@ -91,6 +91,8 @@ class Settings:
     IS_LOCAL = _LOCAL
     # 前端挂载的路径前缀，默认 /；登录回跳与赞助回跳 URL 据此生成。
     FRONTEND_BASE_PATH = _frontend_base(_env("FRONTEND_BASE_PATH", "/"))
+    # Cookie 作用路径：根路径部署为 /，子路径部署（如 /box）时限定到该子树，避免与主站同名 Cookie 互相覆盖。
+    COOKIE_PATH = FRONTEND_BASE_PATH.rstrip("/") or "/"
 
     DATABASE_URL = _env("DATABASE_URL", "postgres://postgres:postgres@127.0.0.1:5432/kegel")
     DB_AUTO_CREATE = False

@@ -35,7 +35,7 @@ async def json_body(request: Request) -> dict:
 
 
 def set_cookie(response: Response, key: str, value: str, max_age: int) -> None:
-    response.set_cookie(key, value, max_age=max_age, path="/", httponly=True, samesite="lax",
+    response.set_cookie(key, value, max_age=max_age, path=Settings.COOKIE_PATH, httponly=True, samesite="lax",
                         secure=Settings.APP_BASE_URL.startswith("https://"))
 
 

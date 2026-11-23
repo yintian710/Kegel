@@ -131,11 +131,11 @@ def _finalize(request: Request, response: Response) -> Response:
     if user and request.url.path != "/api/auth/logout" and not sets_session:
         # 滑动续期：有效期内每次访问都把登录态续到 5 天后。
         response.set_cookie(auth.SESSION_COOKIE, auth.session_cookie_value(user),
-                            max_age=Settings.LOGIN_SESSION_SECONDS, path="/", httponly=True, samesite="lax",
+                            max_age=Settings.LOGIN_SESSION_SECONDS, path=Settings.COOKIE_PATH, httponly=True, samesite="lax",
                             secure=Settings.APP_BASE_URL.startswith("https://"))
     if request.state.new_visitor:
         response.set_cookie(auth.VISITOR_COOKIE, request.state.new_visitor, max_age=Settings.VISITOR_COOKIE_SECONDS,
-                            path="/", httponly=True, samesite="lax",
+                            path=Settings.COOKIE_PATH, httponly=True, samesite="lax",
                             secure=Settings.APP_BASE_URL.startswith("https://"))
     return response
 
