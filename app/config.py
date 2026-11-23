@@ -94,6 +94,14 @@ class Settings:
     # Cookie 作用路径：根路径部署为 /，子路径部署（如 /box）时限定到该子树，避免与主站同名 Cookie 互相覆盖。
     COOKIE_PATH = FRONTEND_BASE_PATH.rstrip("/") or "/"
 
+    # 仅测试环境：开启后无需 OAuth，直接以固定用户进入（用于 /box 测试）。生产切勿开启。
+    AUTO_LOGIN_ENABLED = _flag("AUTO_LOGIN_ENABLED")
+    AUTO_LOGIN_USER_ID = _env("AUTO_LOGIN_USER_ID")
+    AUTO_LOGIN_USERNAME = _env("AUTO_LOGIN_USERNAME", "yintian")
+    AUTO_LOGIN_NAME = _env("AUTO_LOGIN_NAME") or AUTO_LOGIN_USERNAME
+    if AUTO_LOGIN_ENABLED and (not AUTO_LOGIN_USER_ID.isascii() or not AUTO_LOGIN_USER_ID.isdecimal()):
+        raise ValueError("开启 AUTO_LOGIN 时 AUTO_LOGIN_USER_ID 必须为纯数字用户 ID")
+
     DATABASE_URL = _env("DATABASE_URL", "postgres://postgres:postgres@127.0.0.1:5432/kegel")
     DB_AUTO_CREATE = False
     SNOWFLAKE_WORKER_ID = _integer("SNOWFLAKE_WORKER_ID", 0, 0, 1023, "SNOWFLAKE_WORKER_ID 须为 0–1023 的整数")

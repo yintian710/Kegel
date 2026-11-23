@@ -128,7 +128,7 @@ def _finalize(request: Request, response: Response) -> Response:
     user = request.state.user
     sets_session = any(key == b"set-cookie" and value.startswith(SESSION_PREFIX)
                        for key, value in response.raw_headers)
-    if user and request.url.path != "/api/auth/logout" and not sets_session:
+    if user and request.url.path != "/api/auth/logout" and not sets_session and not request.state.auto_login:
         # 滑动续期：有效期内每次访问都把登录态续到 5 天后。
         response.set_cookie(auth.SESSION_COOKIE, auth.session_cookie_value(user),
                             max_age=Settings.LOGIN_SESSION_SECONDS, path=Settings.COOKIE_PATH, httponly=True, samesite="lax",
@@ -142,7 +142,14 @@ def _finalize(request: Request, response: Response) -> Response:
 
 @app.middleware("http")
 async def context_middleware(request: Request, call_next):
-    request.state.user = auth.user_from_cookie(request.cookies.get(auth.SESSION_COOKIE))
+    request.state.auto_login = False
+    user = auth.user_from_cookie(request.cookies.get(auth.SESSION_COOKIE))
+    if user is None and Settings.AUTO_LOGIN_ENABLED and Settings.AUTO_LOGIN_USER_ID:
+        # 测试环境固定用户进入，不走 OAuth。
+        user = {"id": Settings.AUTO_LOGIN_USER_ID, "username": Settings.AUTO_LOGIN_USERNAME,
+                "name": Settings.AUTO_LOGIN_NAME}
+        request.state.auto_login = True
+    request.state.user = user
     request.state.visitor = None
     request.state.new_visitor = None
     request.state.payment_log_id = None

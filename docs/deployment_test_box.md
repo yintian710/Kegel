@@ -99,7 +99,34 @@ systemctl daemon-reload && systemctl enable --now kegel-box
 curl -fsS http://127.0.0.1:7190/health    # 应为 healthy
 ```
 
+### 5.1 测试环境免登录（AUTO_LOGIN，仅测试）
+
+`/box` 测试环境可直接固定管理员用户进入，不走 LINUX DO OAuth：
+
+```bash
+AUTO_LOGIN_ENABLED=true
+AUTO_LOGIN_USER_ID=1
+AUTO_LOGIN_USERNAME=yintian
+ADMIN_USER_IDS=1        # 必须包含上面的 AUTO_LOGIN_USER_ID
+```
+
+- 仅当 `AUTO_LOGIN_ENABLED=true` 且显式配置 `AUTO_LOGIN_USER_ID`（纯数字）时生效；**生产 .env 绝不能设置这两项**。
+- 开启后，服务端在无会话时自动注入该固定用户；该 ID 在 `ADMIN_USER_IDS` 内即可直接访问管理后台。
+
 ## 6. 第五步：Nginx 反代
+
+> 注：若服务器用 **Caddy**（本机即如此），改用下面的 Caddy 片段，放在 site 的 `(kegel_v2)` 片段内、catch-all `handle` 之前：
+> ```
+> handle /box/api { uri strip_prefix /box; reverse_proxy 127.0.0.1:7190 }
+> handle /box/api/* { uri strip_prefix /box; reverse_proxy 127.0.0.1:7190 }
+> handle /box/health { uri strip_prefix /box; reverse_proxy 127.0.0.1:7190 }
+> redir /box /box/ 308
+> handle_path /box/* {
+>     root * /srv/kegel/site-box
+>     try_files {path} /index.html
+>     file_server
+> }
+> ```
 
 把 [deploy/nginx-box.conf](../deploy/nginx-box.conf) 的 `location` 片段加进现有 HTTPS `server {}`（与生产同一域名），然后：
 
