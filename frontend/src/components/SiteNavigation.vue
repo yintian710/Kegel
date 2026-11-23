@@ -10,6 +10,7 @@ const pages = [
   { path: '/', label: '首页' },
   { path: '/practice', label: '提肛练习' },
   { path: '/shop', label: '商店' },
+  { path: '/titles', label: '称号' },
   { path: '/donate', label: '赞助' },
   { path: '/admin', label: '管理' },
 ] as const

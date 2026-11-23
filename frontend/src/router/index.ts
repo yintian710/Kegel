@@ -29,6 +29,14 @@ const router = createRouter({
       },
     },
     {
+      path: '/titles',
+      component: () => import('../pages/TitlesPage.vue'),
+      meta: {
+        title: '称号抽卡 · 提肛打卡',
+        description: '用抽卡券抽取称号，收集图鉴、熔炼合成并解锁 LDC 折扣。',
+      },
+    },
+    {
       path: '/donate',
       component: () => import('../pages/DonatePage.vue'),
       meta: {

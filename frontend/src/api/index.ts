@@ -142,6 +142,43 @@ export interface ShopData {
 export interface PurchaseInput { product_id: string; request_id: string }
 export interface PurchaseData { order: Purchase; status: Purchase['status']; trade_no: string; error: string }
 
+export type Rarity = 'N' | 'R' | 'SR' | 'SSR' | 'UR'
+export type TicketType = 'single' | 'ten' | 'hundred'
+export interface TicketBalances { single: number; ten: number; hundred: number }
+export interface TitleItem {
+  id: string
+  code: string
+  rarity: Rarity
+  weight: number
+  discount_bp: number
+  is_active: boolean
+  is_limited: boolean
+  is_smeltable: boolean
+  name: string
+  description: string
+  icon: string
+  route: string
+  copies: number
+  owned: boolean
+}
+export interface TicketProduct { id: string; name: string; description: string; points_price: number; draw_count: number }
+export interface DrawHistoryItem { id: string; title_id: string; rarity: Rarity; is_new: boolean; created_at: string }
+export interface TitleData {
+  user: User | null
+  tickets: TicketBalances
+  pity: number
+  pity_limit: number
+  equipped_title_id: string | null
+  collection: TitleItem[]
+  ticket_products: TicketProduct[]
+  recipes: Array<{ id: string; output_code: string; materials: string[] }>
+  wallet: Wallet | null
+  history: { draws: DrawHistoryItem[]; crafts: Array<Record<string, unknown>> }
+}
+export interface DrawInput { ticket_type: TicketType; request_id: string }
+export interface DrawData { batch: { id: string; ticket_type: TicketType; count: number }; results: Array<{ title_id: string; rarity: Rarity; is_new: boolean }>; pity: number; pity_limit: number; tickets: TicketBalances }
+export interface TicketPurchaseData { order: { order_no: string; product_name: string; points_cost: number; draw_count: number }; status: string; ticket_type: TicketType | null; tickets: TicketBalances; wallet: Wallet }
+
 export interface DonationLeaderboardItem { rank: number; username: string; amount: string; count: number }
 export interface DonationOrder { order_no: string; amount: string; status: 'created' | 'paid'; created_at: string; paid_at: string | null }
 export interface DonationsData {
@@ -223,6 +260,12 @@ export const shop = {
   get: (config?: RequestConfig) => get<ShopData>('/shop', config),
   purchase: (input: PurchaseInput, config?: RequestConfig) => post<PurchaseData>('/shop/purchase', input, config),
 }
+export const titles = {
+  get: (config?: RequestConfig) => get<TitleData>('/titles', config),
+  draw: (input: DrawInput, config?: RequestConfig) => post<DrawData>('/titles/draw', input, config),
+  buyTicket: (input: { product_id: string; request_id: string }, config?: RequestConfig) => post<TicketPurchaseData>('/titles/tickets/purchase', input, config),
+  equip: (input: { title_id: string | null }, config?: RequestConfig) => post<{ equipped_title_id: string | null }>('/titles/equip', input, config),
+}
 export const donations = {
   get: (config?: RequestConfig) => get<DonationsData>('/donations', config),
   create: (amount: string, config?: RequestConfig) => post<DonationCreateData>('/donations/create', { amount }, config),
@@ -242,7 +285,7 @@ export const admin = {
 // 与 http.ts 一致的 API 前缀；子路径部署（如测试环境 /box）用 VITE_API_BASE=/box/api 覆盖。
 export const API_BASE = (import.meta.env.VITE_API_BASE || '/api').replace(/\/$/, '')
 
-const LOGIN_PATHS: Record<string, true> = { '/': true, '/practice': true, '/shop': true, '/donate': true, '/admin': true }
+const LOGIN_PATHS: Record<string, true> = { '/': true, '/practice': true, '/shop': true, '/titles': true, '/donate': true, '/admin': true }
 export function loginUrl(next = '/'): string {
   const safeNext = LOGIN_PATHS[next] ? next : '/'
   return `${API_BASE}/auth/linuxdo/start?${new URLSearchParams({ next: safeNext })}`
