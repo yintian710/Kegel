@@ -181,6 +181,31 @@ def _outcome(order: dict) -> dict:
     return {"order": order, "status": order["status"], "trade_no": order["trade_no"], "error": order["error"]}
 
 
+async def best_discount_bp(user_id: str) -> int:
+    """最优 LDC 折扣（bp）；无折扣返回 10000。多称号不叠加，取最低 bp。"""
+    row = await fetch_one(
+        "SELECT MIN(d.discount_bp) AS bp FROM user_titles ut JOIN title_defs d ON d.id=ut.title_id "
+        "WHERE ut.user_id=$1 AND d.discount_bp BETWEEN 9000 AND 9999", user_id)
+    return int(row["bp"]) if row and row["bp"] is not None else 10000
+
+
+async def discount_saved_today(user_id: str, today: str) -> int:
+    row = await fetch_one(
+        f"SELECT COALESCE(SUM(points_discount_saved),0) AS s FROM shop_purchases "
+        f"WHERE user_id=$1 AND day=$2 AND category='LDC' AND status IN {_HOLDING}", user_id, today)
+    return int(row["s"])
+
+
+async def discount_view(user_id: str | None, today: str) -> dict:
+    cap = Settings.DAILY_DISCOUNT_SAVE_CAP
+    if not user_id:
+        return {"bp": 10000, "label": "无折扣", "saved_today": 0, "cap": cap, "remaining": cap}
+    bp = await best_discount_bp(user_id)
+    saved = await discount_saved_today(user_id, today)
+    return {"bp": bp, "label": "无折扣" if bp >= 10000 else f"{round(bp / 100)}折",
+            "saved_today": saved, "cap": cap, "remaining": max(0, cap - saved)}
+
+
 async def _reserve(user: dict, product_id: int, today: str, now: float, request_id: str | None) -> tuple[dict, bool]:
     """Transaction 1: validate limits, debit points and persist a pending order. -> (order, is_new)."""
     async with write_txn():
@@ -214,10 +239,21 @@ async def _reserve(user: dict, product_id: int, today: str, now: float, request_
             raise ValueError(f"今日全站 LDC 兑换额度不足：剩余 {remaining:.2f} LDC，"
                              f"本次兑换 {product['ldc_amount']} LDC；不支持拆分兑换")
         order_no = f"SO-{today.replace('-', '')}-{secrets.token_hex(6).upper()}"
-        await credits.spend_points(user, product["points_price"], "shop_purchase", order_no, now)
+        original = int(product["points_price"])
+        points_cost, used_bp, saved = original, 10000, 0
+        discount_bp = await best_discount_bp(user["id"])
+        if discount_bp < 10000:
+            desired = original - (original * discount_bp + 9999) // 10000
+            cap_left = max(0, Settings.DAILY_DISCOUNT_SAVE_CAP - await discount_saved_today(user["id"], today))
+            saved = min(desired, cap_left)
+            points_cost = original - saved
+            used_bp = discount_bp if saved > 0 else 10000
+        await credits.spend_points(user, points_cost, "shop_purchase", order_no, now)
         await ShopPurchase.create(order_no=order_no, product_id=product_id, category=product["category"],
                                   product_name=product["name"], user_id=user["id"], username=user["username"],
-                                  points_cost=product["points_price"], ldc_amount=product["ldc_amount"],
+                                  points_cost=points_cost, points_cost_original=original,
+                                  points_discount_bp=used_bp, points_discount_saved=saved,
+                                  ldc_amount=product["ldc_amount"],
                                   status="pending", created_at=now, day=today, request_id=request_id)
         return await fetch_one("SELECT * FROM shop_purchases WHERE order_no=$1", order_no), True
 

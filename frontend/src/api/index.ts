@@ -136,10 +136,12 @@ export interface ShopData {
   oauth_ready: boolean
   wallet: Wallet | null
   quota: Quota
+  discount: ShopDiscount
   ledger: LedgerEntry[]
   products: Product[]
   purchases: Purchase[]
 }
+export interface ShopDiscount { bp: number; label: string; saved_today: number; cap: number; remaining: number }
 export interface PurchaseInput { product_id: string; request_id: string }
 export interface PurchaseData { order: Purchase; status: Purchase['status']; trade_no: string; error: string }
 

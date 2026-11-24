@@ -5,7 +5,7 @@ import asyncio
 import pytest
 
 from app.config import Settings
-from app.infrastructure.database import execute, fetch
+from app.infrastructure.database import execute, fetch, fetch_one
 from app.service import catalog
 from tests.conftest import ADMIN_USER_ID, SECONDARY_SECRET
 
@@ -262,3 +262,22 @@ async def test_no_payout_list_withholds_transfer_but_looks_normal_to_user(client
     for url in ("/api/shop", "/api/status"):
         body = (await client.request(url, user=1))[1]
         assert "no_payout" not in str(body) and "no_payout_user_ids" not in str(body)
+
+
+async def test_ur_discount_applies_to_ldc_purchase(client, monkeypatch):
+    from app.service import titles
+    await titles.admin_save({"code": "UR-TEST", "rarity": "UR", "weight": 1, "name": "折扣UR", "discount_bp": 9500})
+    ur_id = (await fetch("SELECT id FROM title_defs WHERE code='UR-TEST'"))[0]["id"]
+    await execute("INSERT INTO user_titles(user_id,title_id,copies,first_obtained_at,last_obtained_at) "
+                  "VALUES ('1',$1,1,0,0) ON CONFLICT(user_id,title_id) DO UPDATE SET copies=1", ur_id)
+    await seed_wallet(1, 100000)
+    product_id = await make_product(client, "100.00", 1000)
+    code, result = await buy(client, 1, product_id, "req-discount-0001-0001")
+    assert code == 200, result
+    order = result["order"]
+    assert order["points_cost"] == 950          # 95 折
+    assert order["points_cost_original"] == 1000
+    assert order["points_discount_saved"] == 50
+    assert order["points_discount_bp"] == 9500
+    code, shop = await client.request("/api/shop", user=1)
+    assert shop["discount"]["bp"] == 9500 and shop["discount"]["saved_today"] == 50
