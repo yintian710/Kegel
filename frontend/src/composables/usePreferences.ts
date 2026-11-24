@@ -6,6 +6,9 @@ export interface GlobalPreferences {
   exerciseName: string
   notifyHour: boolean
   notifyHalfHour: boolean
+  theme: 'light' | 'dark' | 'system'
+  soundEnabled: boolean
+  hapticEnabled: boolean
 }
 
 const DEFAULTS: Readonly<GlobalPreferences> = Object.freeze({
@@ -13,6 +16,9 @@ const DEFAULTS: Readonly<GlobalPreferences> = Object.freeze({
   exerciseName: '',
   notifyHour: false,
   notifyHalfHour: false,
+  theme: 'system',
+  soundEnabled: true,
+  hapticEnabled: true,
 })
 
 function cleanName(value: unknown): string {
@@ -29,11 +35,16 @@ function safeRead(): Record<string, unknown> {
 }
 
 function normalize(candidate: Record<string, unknown>): GlobalPreferences {
+  const themeCandidate = candidate.theme as string
+  const validTheme = themeCandidate === 'light' || themeCandidate === 'dark' || themeCandidate === 'system' ? themeCandidate : DEFAULTS.theme
   return {
     hideTigang: candidate.hideTigang === true || DEFAULTS.hideTigang,
     exerciseName: cleanName(candidate.exerciseName) || DEFAULTS.exerciseName,
     notifyHour: candidate.notifyHour === true || DEFAULTS.notifyHour,
     notifyHalfHour: candidate.notifyHalfHour === true || DEFAULTS.notifyHalfHour,
+    theme: validTheme,
+    soundEnabled: candidate.soundEnabled !== false,
+    hapticEnabled: candidate.hapticEnabled !== false,
   }
 }
 
@@ -148,11 +159,63 @@ function scheduleReminder(): void {
   }, Math.max(0, target.getTime() - Date.now()))
 }
 
+export function applyTheme(): void {
+  if (typeof document === 'undefined') return
+  const mode = preferences.theme || 'system'
+  const isDark = mode === 'dark' || (mode === 'system' && window.matchMedia?.('(prefers-color-scheme: dark)').matches)
+  document.documentElement.dataset.theme = isDark ? 'dark' : 'light'
+}
+
+export function playFeedbackSound(type: 'step' | 'complete' = 'step'): void {
+  if (!preferences.soundEnabled || typeof window === 'undefined') return
+  try {
+    const AudioContextClass = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext
+    if (!AudioContextClass) return
+    const ctx = new AudioContextClass()
+    const osc = ctx.createOscillator()
+    const gain = ctx.createGain()
+    osc.connect(gain)
+    gain.connect(ctx.destination)
+
+    if (type === 'step') {
+      osc.type = 'sine'
+      osc.frequency.setValueAtTime(523.25, ctx.currentTime) // C5
+      osc.frequency.exponentialRampToValueAtTime(783.99, ctx.currentTime + 0.12) // G5
+      gain.gain.setValueAtTime(0.06, ctx.currentTime)
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.16)
+      osc.start(ctx.currentTime)
+      osc.stop(ctx.currentTime + 0.17)
+    } else {
+      osc.type = 'triangle'
+      osc.frequency.setValueAtTime(523.25, ctx.currentTime) // C5
+      osc.frequency.setValueAtTime(659.25, ctx.currentTime + 0.08) // E5
+      osc.frequency.setValueAtTime(783.99, ctx.currentTime + 0.16) // G5
+      osc.frequency.setValueAtTime(1046.50, ctx.currentTime + 0.24) // C6
+      gain.gain.setValueAtTime(0.09, ctx.currentTime)
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.42)
+      osc.start(ctx.currentTime)
+      osc.stop(ctx.currentTime + 0.43)
+    }
+  } catch {
+    // Audio playback policy or unsupported
+  }
+}
+
+export function triggerHaptic(pattern: number | number[] = 25): void {
+  if (!preferences.hapticEnabled || typeof navigator === 'undefined') return
+  try {
+    if ('vibrate' in navigator) navigator.vibrate(pattern)
+  } catch {
+    // Unsupported
+  }
+}
+
 export function updatePreferences(next: Partial<GlobalPreferences>, updateUrl = true): void {
   Object.assign(preferences, normalize({ ...toRaw(preferences), ...next }))
   persist()
   if (updateUrl) updateAddress()
   refreshDocumentPreferences()
+  applyTheme()
   scheduleReminder()
   emitChange()
 }
@@ -178,6 +241,9 @@ export function usePreferences() {
     preferenceQuery,
     notificationMessage,
     requestNotificationPermission,
+    applyTheme,
+    playFeedbackSound,
+    triggerHaptic,
   }
 }
 
@@ -185,10 +251,17 @@ window.addEventListener('storage', (event) => {
   if (event.key !== STORAGE_KEY) return
   Object.assign(preferences, normalize(safeRead()))
   refreshDocumentPreferences()
+  applyTheme()
   scheduleReminder()
   emitChange()
 })
 
 persist()
+applyTheme()
+if (typeof window !== 'undefined' && window.matchMedia) {
+  window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
+    if (preferences.theme === 'system') applyTheme()
+  })
+}
 scheduleReminder()
 queueMicrotask(() => window.dispatchEvent(new CustomEvent('practicepreferencesready', { detail: { ...toRaw(preferences) } })))

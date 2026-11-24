@@ -24,7 +24,7 @@ export const useIdentityStore = defineStore('identity', () => {
     }
   }
 
-  async function requireLogin(next: '/' | '/practice' | '/shop' | '/donate' | '/admin'): Promise<boolean> {
+  async function requireLogin(next: '/' | '/practice' | '/shop' | '/titles' | '/donate' | '/admin' | string): Promise<boolean> {
     if (!loaded.value) await refresh()
     if (oauthReady.value && !user.value) {
       window.location.assign(loginUrl(next))

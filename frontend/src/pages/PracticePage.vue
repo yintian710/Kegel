@@ -4,7 +4,7 @@ import { ApiError, loginUrl, practice as practiceApi, type PracticeData } from '
 import PracticeSettings from '../components/PracticeSettings.vue'
 import { readPracticePreferences, useLocalPractice, type LocalPracticeSession, type PracticePreferences } from '../composables/useLocalPractice'
 import { useBodyAttributes } from '../composables/useBodyAttributes'
-import { ft } from '../composables/usePreferences'
+import { ft, playFeedbackSound, triggerHaptic } from '../composables/usePreferences'
 
 useBodyAttributes({ class: ['stage-wrap', 'practice-page'], data: { page: 'practice', step: '0' }, htmlClass: 'practice-page-root' })
 
@@ -23,6 +23,9 @@ const showResult = ref(false)
 const notice = ref('')
 const remaining = ref(0)
 const now = ref(Date.now())
+const zenMode = ref(false)
+const trainingTab = ref<'daily' | 'all' | 'records'>('daily')
+
 let ticker: number | undefined
 let poller: number | undefined
 let noticeTimer: number | undefined
@@ -120,23 +123,39 @@ async function syncTraining(retryRejected = false): Promise<void> {
 async function begin(): Promise<void> {
   if (!settingsPanel.value?.validate()) throw new Error('请先修正练习设置中的提示。')
   showResult.value = false
+  playFeedbackSound('step')
+  triggerHaptic(30)
   applySession(localPractice.start(settings.value, training.value?.user?.id))
 }
 async function stepSession(): Promise<void> {
   const session = activeSession.value
   if (busy.value || !session || Date.now() < session.ready_at) return
   busy.value = true
-  try { applySession(localPractice.step(session.token)) }
-  catch (error) { autoPaused.value = session.mode === 'auto'; notify(errorMessage(error)) }
-  finally { busy.value = false }
+  try {
+    applySession(localPractice.step(session.token))
+    playFeedbackSound('step')
+    triggerHaptic(30)
+  } catch (error) {
+    autoPaused.value = session.mode === 'auto'
+    notify(errorMessage(error))
+  } finally {
+    busy.value = false
+  }
 }
 async function completeSession(): Promise<void> {
   const session = activeSession.value
   if (busy.value || !session || session.step !== session.repetitions - 1 || Date.now() < session.ready_at) return
   busy.value = true
-  try { applySession(localPractice.complete(session.token)) }
-  catch (error) { autoPaused.value = session.mode === 'auto'; notify(errorMessage(error)) }
-  finally { busy.value = false }
+  try {
+    applySession(localPractice.complete(session.token))
+    playFeedbackSound('complete')
+    triggerHaptic([30, 60, 40])
+  } catch (error) {
+    autoPaused.value = session.mode === 'auto'
+    notify(errorMessage(error))
+  } finally {
+    busy.value = false
+  }
   if (activeSession.value?.completed) await refreshTraining(true)
 }
 async function advance(): Promise<void> {
@@ -148,6 +167,8 @@ async function advance(): Promise<void> {
     if (Date.now() < activeSession.value.ready_at) return
     if (activeSession.value.step === activeSession.value.repetitions - 1) { busy.value = false; await completeSession(); return }
     applySession(localPractice.step(activeSession.value.token))
+    playFeedbackSound('step')
+    triggerHaptic(30)
   } catch (error) { notify(errorMessage(error)) }
   finally { busy.value = false }
 }
@@ -219,39 +240,265 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <main class="practice-layout">
+  <main class="practice-layout" :class="{ 'is-zen-mode': zenMode }">
     <div class="practice-main-column">
-      <section class="stage-main" tabindex="0" :role="activeSession && (remaining > 0 || activeSession.mode === 'auto') ? 'region' : 'button'" :aria-label="ft(activeSession && remaining > 0 ? `正在进行第 ${step + 1} 次练习，等待倒计时` : `开始第 ${activeSession ? Math.min(step + 2, repetitions) : 1} 次练习`)" @click="stageClick" @keydown="stageKey">
+      <section
+        class="stage-main"
+        tabindex="0"
+        :role="activeSession && (remaining > 0 || activeSession.mode === 'auto') ? 'region' : 'button'"
+        :aria-label="ft(activeSession && remaining > 0 ? `正在进行第 ${step + 1} 次练习，等待倒计时` : `开始第 ${activeSession ? Math.min(step + 2, repetitions) : 1} 次练习`)"
+        @click="stageClick"
+        @keydown="stageKey"
+      >
+        <!-- 专注模式切换按钮 -->
+        <div class="practice-top-bar" data-interactive>
+          <button
+            type="button"
+            class="btn-zen-mode"
+            :class="{ active: zenMode }"
+            :title="zenMode ? '退出专注模式' : '进入沉浸专注训练'"
+            @click="zenMode = !zenMode"
+          >
+            <span>{{ zenMode ? '✕ 退出专注' : '🧘 禅意专注' }}</span>
+          </button>
+        </div>
+
         <div class="stage-content">
-          <div v-if="!completed">
-            <h1 ref="promptElement" class="landing-prompt" aria-live="polite" aria-atomic="true">{{ prompt }}</h1>
-            <p class="landing-sub"><span>{{ hint }}</span><span>{{ remaining > 0 ? `${remaining} 秒` : '' }}</span></p>
-            <button v-if="activeSession?.mode === 'auto'" class="btn-secondary auto-stop-button" type="button" data-interactive @click="autoPaused = !autoPaused">{{ autoPaused ? '继续自动练习' : '停止自动练习' }}</button>
-            <button v-if="activeSession" class="btn-secondary auto-stop-button" type="button" data-interactive :disabled="busy" @click="abandon">放弃本轮</button>
-            <div v-if="activeSession" class="dots-progress" aria-label="练习进度"><span v-for="index in repetitions" :key="index" :class="{ active: index - 1 <= step }" /></div>
-          </div>
-          <section v-else class="completion-container" data-interactive>
-            <div class="completion-card"><div class="completion-info">
-              <h2 class="completion-title">{{ activeSession?.abandoned ? '本轮已放弃' : '本轮练习完成' }}</h2>
-              <p class="completion-reward-text">共完成 {{ completedCount }} 次{{ completedCount === 0 ? '，未产生训练记录。' : uploaded ? '，已上传并计入训练榜。' : '，尚未计入训练榜。' }}</p>
-              <div class="completion-actions">
-                <button class="btn-secondary" type="button" :disabled="busy" @click="restart">再练一轮</button>
-                <button v-if="completedCount > 0 && !uploaded && activeSession?.round_id" class="btn-primary" type="button" :disabled="syncing || wrongUser" @click="upload">{{ training?.user ? '上传训练记录' : '登录后上传' }}</button>
-                <RouterLink class="btn-secondary" to="/">返回首页</RouterLink>
-                <span class="status-pill" :class="{ credited: uploaded }">{{ statusPill }}</span>
+          <!-- 练习进行中 -->
+          <div v-if="!completed" class="hero-stage-box">
+            <!-- 练习动态节拍光环 -->
+            <div class="breathing-ring-wrapper" :class="{ 'is-active': activeSession && remaining > 0, 'phase-lift': phase?.index === 0, 'phase-relax': phase?.index === 1, 'phase-rest': phase?.index === 2 }">
+              <div class="breathing-glow-aura" />
+              <svg class="breathing-ring-svg" viewBox="0 0 240 240">
+                <circle class="ring-bg" cx="120" cy="120" r="102" />
+                <circle
+                  v-if="activeSession && remaining > 0"
+                  class="ring-progress-bar"
+                  cx="120"
+                  cy="120"
+                  r="102"
+                  :stroke-dasharray="640"
+                  :stroke-dashoffset="640 - (640 * (activeSession.interval_seconds > 0 ? ((activeSession.interval_seconds - remaining) / activeSession.interval_seconds) : 0))"
+                />
+              </svg>
+              <div class="ring-inner-content">
+                <span v-if="phase" class="ring-phase-badge">
+                  第 {{ step + 1 }} / {{ repetitions }} 次 · {{ phase.text }}
+                </span>
+                <span v-else class="ring-phase-badge">
+                  {{ settings.mode === 'auto' ? '自动练习就绪' : '手动练习就绪' }}
+                </span>
+                <div v-if="remaining > 0" class="ring-timer-text">
+                  00:0{{ remaining }}
+                </div>
+                <div v-else class="ring-idle-icon">
+                  🧘
+                </div>
+                <span class="ring-action-hint">
+                  {{ phase ? phase.text : (activeSession ? '进入下一次' : '点击开始') }}
+                </span>
               </div>
-              <p class="status-copy" aria-live="polite">{{ resultNote }}</p>
-            </div></div>
+            </div>
+
+            <h1 ref="promptElement" class="landing-prompt" aria-live="polite" aria-atomic="true">
+              {{ prompt }}
+            </h1>
+            <p class="landing-sub">
+              <span>{{ hint }}</span>
+              <span v-if="remaining > 0" style="margin-left:4px">{{ remaining }} 秒</span>
+            </p>
+
+            <div class="practice-controls-row" data-interactive>
+              <button
+                v-if="activeSession?.mode === 'auto'"
+                class="btn-secondary auto-stop-button"
+                type="button"
+                @click="autoPaused = !autoPaused"
+              >
+                {{ autoPaused ? '▶ 继续自动练习' : '⏸ 暂停自动练习' }}
+              </button>
+              <button
+                v-if="activeSession"
+                class="btn-secondary auto-stop-button btn-abandon"
+                type="button"
+                :disabled="busy"
+                @click="abandon"
+              >
+                放弃本轮
+              </button>
+            </div>
+
+            <!-- 进度指示 -->
+            <div v-if="activeSession" class="step-nodes-container" aria-label="练习进度">
+              <div
+                v-for="index in repetitions"
+                :key="index"
+                class="step-node-item"
+                :class="{
+                  completed: index - 1 < step,
+                  current: index - 1 === step,
+                  pending: index - 1 > step
+                }"
+              >
+                <div class="step-node-bubble">
+                  <span v-if="index - 1 < step">✓</span>
+                  <span v-else>{{ index }}</span>
+                </div>
+                <span class="step-node-label">{{ index }}</span>
+              </div>
+            </div>
+
+            <div v-if="activeSession" class="dots-progress" aria-hidden="true" style="display:none">
+              <span v-for="index in repetitions" :key="index" :class="{ active: index - 1 <= step }" />
+            </div>
+          </div>
+
+          <!-- 练习完成结算卡片 -->
+          <section v-else class="completion-container" data-interactive>
+            <div class="completion-card">
+              <div class="completion-check-wrap">
+                <div class="check-aura" />
+                <div class="check-circle" :style="{ background: activeSession?.abandoned ? 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)' : undefined }">
+                  <span v-if="activeSession?.abandoned" style="font-size:32px">✋</span>
+                  <svg v-else fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" />
+                  </svg>
+                </div>
+              </div>
+              <div class="completion-info">
+                <h2 class="completion-title">{{ activeSession?.abandoned ? '本轮已提前终止' : '🎉 本轮练习圆满完成' }}</h2>
+                <p class="completion-reward-text">
+                  共完成 <b>{{ completedCount }}</b> 次{{ completedCount === 0 ? '，未产生训练记录。' : uploaded ? '，已同步计入训练榜。' : '，尚未同步至训练榜。' }}
+                </p>
+                <div class="completion-actions">
+                  <button class="btn-primary" type="button" :disabled="busy" @click="restart">再练一轮 ➔</button>
+                  <button
+                    v-if="completedCount > 0 && !uploaded && activeSession?.round_id"
+                    class="btn-secondary"
+                    type="button"
+                    :disabled="syncing || wrongUser"
+                    @click="upload"
+                  >
+                    {{ training?.user ? '立即上传云端' : '登录后上传' }}
+                  </button>
+                  <RouterLink class="btn-secondary" to="/">返回打卡首页</RouterLink>
+                  <span class="status-pill" :class="{ credited: uploaded }">{{ statusPill }}</span>
+                </div>
+                <p class="status-copy" aria-live="polite">{{ resultNote }}</p>
+              </div>
+            </div>
           </section>
         </div>
       </section>
 
-      <section class="card practice-ranking" data-interactive aria-labelledby="practiceRankingTitle"><div class="practice-ranking-header"><div><h3 id="practiceRankingTitle" class="card-title">每日训练榜</h3><p class="card-subtitle" style="margin:4px 0 0">按今日已上传并通过校验的训练次数排序</p></div><span class="practice-ranking-total">{{ practiceTotal }}</span></div><div class="table-wrap" style="max-height:320px"><table class="rank-table"><thead><tr><th>名次</th><th>用户名</th><th>完成次数</th></tr></thead><tbody><tr v-if="!training?.leaderboard.length"><td colspan="3" style="text-align:center;color:var(--text-dim)">登录后完成训练并上传，即可计入训练榜。</td></tr><tr v-for="record in training?.leaderboard || []" :key="`${record.rank}-${record.username}`" :class="{ 'current-user': record.username === training?.user?.username }"><td>{{ record.rank }}</td><td>{{ record.username === training?.user?.username ? `你 (@${record.username})` : `@${record.username}` }}</td><td>{{ record.count }} 次</td></tr></tbody></table></div></section>
-      <section class="card practice-ranking" data-interactive aria-labelledby="totalPracticeRankingTitle"><div class="practice-ranking-header"><div><h3 id="totalPracticeRankingTitle" class="card-title">训练总榜</h3><p class="card-subtitle" style="margin:4px 0 0">按所有日期已上传并通过校验的累计训练次数排序</p></div><span class="practice-ranking-total">{{ allTimeTotal }}</span></div><div class="table-wrap" style="max-height:320px"><table class="rank-table"><thead><tr><th>名次</th><th>用户名</th><th>累计次数</th></tr></thead><tbody><tr v-if="!training?.total_leaderboard.length"><td colspan="3" style="text-align:center;color:var(--text-dim)">登录后完成训练并上传，即可计入训练榜。</td></tr><tr v-for="record in training?.total_leaderboard || []" :key="`${record.rank}-${record.username}`" :class="{ 'current-user': record.username === training?.user?.username }"><td>{{ record.rank }}</td><td>{{ record.username === training?.user?.username ? `你 (@${record.username})` : `@${record.username}` }}</td><td>{{ record.count }} 次</td></tr></tbody></table></div></section>
-      <section class="card practice-ranking" data-interactive aria-labelledby="trainingRecordsTitle"><div class="practice-ranking-header"><div><h3 id="trainingRecordsTitle" class="card-title">我的训练记录</h3><p class="card-subtitle" style="margin:4px 0 0">最近 50 轮已上传记录 · 北京时间</p></div></div><div class="table-wrap" style="max-height:320px"><table class="rank-table"><thead><tr><th>开始时间</th><th>结束时间</th><th>次数</th><th>方式</th></tr></thead><tbody><tr v-if="!training?.records.length"><td colspan="4">{{ training?.user ? '暂无已上传的训练记录。' : '登录后可上传并查看你的训练记录。' }}</td></tr><tr v-for="record in training?.records || []" :key="record.round_id"><td>{{ formatTime(record.started_at) }}</td><td>{{ formatTime(record.ended_at) }}</td><td>{{ record.repetitions }} 次</td><td>{{ record.mode === 'auto' ? '自动' : '手动' }}</td></tr></tbody></table></div></section>
+      <!-- 排行榜与记录卡片 (Zen Mode 下隐藏) -->
+      <section v-show="!zenMode" class="card practice-ranking-box" data-interactive>
+        <div class="home-tabs-header" style="margin-bottom:18px">
+          <button
+            type="button"
+            class="home-tab-btn"
+            :class="{ active: trainingTab === 'daily' }"
+            @click="trainingTab = 'daily'"
+          >
+            📅 今日训练榜 <span class="tab-badge">{{ practiceTotal }}</span>
+          </button>
+          <button
+            type="button"
+            class="home-tab-btn"
+            :class="{ active: trainingTab === 'all' }"
+            @click="trainingTab = 'all'"
+          >
+            🌟 训练总榜 <span class="tab-badge">{{ allTimeTotal }}</span>
+          </button>
+          <button
+            type="button"
+            class="home-tab-btn"
+            :class="{ active: trainingTab === 'records' }"
+            @click="trainingTab = 'records'"
+          >
+            📋 我的训练历史
+          </button>
+        </div>
+
+        <!-- TAB 1: 今日训练榜 -->
+        <div v-show="trainingTab === 'daily'">
+          <div class="table-wrap" style="max-height:340px">
+            <table class="rank-table">
+              <thead>
+                <tr><th>名次</th><th>用户名</th><th>今日训练次数</th></tr>
+              </thead>
+              <tbody>
+                <tr v-if="!training?.leaderboard.length">
+                  <td colspan="3" style="text-align:center;color:var(--text-dim);padding:24px">登录后完成训练并上传，即可计入训练榜。</td>
+                </tr>
+                <tr
+                  v-for="record in training?.leaderboard || []"
+                  :key="`${record.rank}-${record.username}`"
+                  :class="{ 'current-user': record.username === training?.user?.username }"
+                >
+                  <td>{{ record.rank }}</td>
+                  <td>{{ record.username === training?.user?.username ? `你 (@${record.username})` : `@${record.username}` }}</td>
+                  <td style="font-weight:700;color:var(--primary)">{{ record.count }} 次</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- TAB 2: 训练总榜 -->
+        <div v-show="trainingTab === 'all'">
+          <div class="table-wrap" style="max-height:340px">
+            <table class="rank-table">
+              <thead>
+                <tr><th>名次</th><th>用户名</th><th>累计训练次数</th></tr>
+              </thead>
+              <tbody>
+                <tr v-if="!training?.total_leaderboard.length">
+                  <td colspan="3" style="text-align:center;color:var(--text-dim);padding:24px">登录后完成训练并上传，即可计入训练榜。</td>
+                </tr>
+                <tr
+                  v-for="record in training?.total_leaderboard || []"
+                  :key="`${record.rank}-${record.username}`"
+                  :class="{ 'current-user': record.username === training?.user?.username }"
+                >
+                  <td>{{ record.rank }}</td>
+                  <td>{{ record.username === training?.user?.username ? `你 (@${record.username})` : `@${record.username}` }}</td>
+                  <td style="font-weight:700;color:var(--primary)">{{ record.count }} 次</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- TAB 3: 我的历史记录 -->
+        <div v-show="trainingTab === 'records'">
+          <div class="table-wrap" style="max-height:340px">
+            <table class="rank-table">
+              <thead>
+                <tr><th>开始时间</th><th>结束时间</th><th>完成次数</th><th>练习方式</th></tr>
+              </thead>
+              <tbody>
+                <tr v-if="!training?.records.length">
+                  <td colspan="4" style="text-align:center;color:var(--text-dim);padding:24px">{{ training?.user ? '暂无已上传的训练记录。' : '登录后可上传并查看你的训练记录。' }}</td>
+                </tr>
+                <tr v-for="record in training?.records || []" :key="record.round_id">
+                  <td>{{ formatTime(record.started_at) }}</td>
+                  <td>{{ formatTime(record.ended_at) }}</td>
+                  <td style="font-weight:700">{{ record.repetitions }} 次</td>
+                  <td><span class="status-pill">{{ record.mode === 'auto' ? '自动' : '手动' }}</span></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
     </div>
-    <aside aria-label="练习与提醒设置"><PracticeSettings ref="settingsPanel" v-model="settings" /></aside>
+
+    <!-- 右侧设置侧边栏 (Zen Mode 下隐藏) -->
+    <aside v-show="!zenMode" aria-label="练习与提醒设置">
+      <PracticeSettings ref="settingsPanel" v-model="settings" />
+    </aside>
   </main>
-  <footer class="practice-footer">训练在本地计时；登录后上传起止时间与次数，独立统计，不影响每日打卡。</footer>
+  <footer class="practice-footer">训练在本地精准计时；登录后上传起止时间与次数，独立统计，不影响每日打卡。</footer>
   <div v-if="notice" class="toast-notice" role="status" aria-live="polite">{{ notice }}</div>
 </template>

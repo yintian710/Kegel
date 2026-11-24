@@ -1,6 +1,7 @@
 <script setup lang="ts">
+import { computed, onMounted, ref } from 'vue'
 import { API_BASE, loginUrl, logoutUrl } from '../api'
-import { ft, preferenceQuery } from '../composables/usePreferences'
+import { applyTheme, ft, preferenceQuery, preferences, triggerHaptic, updatePreferences } from '../composables/usePreferences'
 import { useIdentity } from '../composables/useIdentity'
 
 const route = useRoute()
@@ -17,7 +18,7 @@ const pages = [
 const carriedQuery = computed(() => preferenceQuery())
 const accountLabel = computed(() => {
   if (loadFailed.value) return '账户加载失败'
-  if (!loaded.value || loading.value) return '正在加载账户…'
+  if (!loaded.value || loading.value) return '正在加载…'
   if (user.value) return `@${user.value.username} · 退出`
   return oauthReady.value ? 'LINUX DO 登录' : '登录暂未配置'
 })
@@ -26,6 +27,21 @@ const accountDisabled = computed(() => loadFailed.value || !loaded.value || load
 function handleAccount(): void {
   if (user.value) window.location.assign(logoutUrl())
   else if (oauthReady.value) window.location.assign(loginUrl(route.path))
+}
+
+function cycleTheme(): void {
+  const current = preferences.theme || 'system'
+  const next = current === 'dark' ? 'light' : current === 'light' ? 'system' : 'dark'
+  updatePreferences({ theme: next })
+  applyTheme()
+  triggerHaptic()
+}
+
+function openSettings(): void {
+  const el = document.getElementById('practicePreferences') as HTMLDetailsElement | null
+  if (el) {
+    el.open = !el.open
+  }
 }
 
 onMounted(async () => {
@@ -54,9 +70,31 @@ onMounted(async () => {
       >
         {{ ft(page.label) }}
       </RouterLink>
-      <button id="accountButton" class="user-btn" type="button" :disabled="accountDisabled" @click="handleAccount">
-        {{ accountLabel }}
-      </button>
+      <div class="header-actions">
+        <button
+          class="icon-btn theme-toggle-btn"
+          type="button"
+          :title="`当前外观: ${preferences.theme === 'dark' ? '深色' : preferences.theme === 'light' ? '浅色' : '跟随系统'}（点击切换）`"
+          aria-label="切换主题外观"
+          @click="cycleTheme"
+        >
+          <span v-if="preferences.theme === 'dark'">🌙</span>
+          <span v-else-if="preferences.theme === 'light'">☀️</span>
+          <span v-else>💻</span>
+        </button>
+        <button
+          class="icon-btn"
+          type="button"
+          title="打开偏好设置"
+          aria-label="打开偏好设置"
+          @click="openSettings"
+        >
+          ⚙️
+        </button>
+        <button id="accountButton" class="user-btn" type="button" :disabled="accountDisabled" @click="handleAccount">
+          {{ accountLabel }}
+        </button>
+      </div>
     </nav>
   </header>
 </template>
