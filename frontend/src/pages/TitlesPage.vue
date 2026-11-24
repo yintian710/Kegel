@@ -38,6 +38,44 @@ const grouped = computed(() => rarityOrder.map((rarity) => ({
   owned: (data.value?.collection ?? []).filter((item) => item.rarity === rarity && item.owned).length,
 })))
 const wallet = computed(() => Number(data.value?.wallet?.balance ?? 0))
+const codeMap = computed<Record<string, TitleItem>>(() => {
+  const map: Record<string, TitleItem> = {}
+  for (const item of data.value?.collection ?? []) map[item.code] = item
+  return map
+})
+const smeltRarities: Rarity[] = ['N', 'R', 'SR']
+const nextRarityMap: Record<string, Rarity> = { N: 'R', R: 'SR', SR: 'SSR' }
+const smeltCostMap: Record<string, { random: number; target: number }> = {
+  N: { random: 3, target: 6 }, R: { random: 3, target: 6 }, SR: { random: 5, target: 10 },
+}
+const smeltMode = ref<'random' | 'target'>('random')
+const smeltRarity = ref<Rarity>('N')
+const smeltSelection = ref<Record<string, number>>({})
+const smeltTarget = ref('')
+const smeltCost = computed(() => smeltCostMap[smeltRarity.value][smeltMode.value])
+const smeltCandidates = computed(() => (data.value?.collection ?? [])
+  .filter((item) => item.rarity === smeltRarity.value && availableOf(item) > 0)
+  .map((item) => ({ ...item, available: availableOf(item) })))
+const selectedTotal = computed(() => Object.values(smeltSelection.value).reduce((sum, n) => sum + n, 0))
+const targetCandidates = computed(() => (data.value?.collection ?? []).filter((item) => item.rarity === nextRarityMap[smeltRarity.value]))
+
+function availableOf(item: TitleItem): number {
+  return item.copies - (data.value?.equipped_title_id === item.id ? 1 : 0)
+}
+function resetSmelt(): void { smeltSelection.value = {}; smeltTarget.value = '' }
+function addMaterial(item: TitleItem): void {
+  const current = smeltSelection.value[item.id] ?? 0
+  if (current >= availableOf(item)) return
+  smeltSelection.value = { ...smeltSelection.value, [item.id]: current + 1 }
+}
+function subMaterial(item: TitleItem): void {
+  const current = smeltSelection.value[item.id] ?? 0
+  if (current <= 0) return
+  const next = { ...smeltSelection.value }
+  if (current <= 1) delete next[item.id]
+  else next[item.id] = current - 1
+  smeltSelection.value = next
+}
 
 function messageOf(error: unknown): string { return error instanceof Error ? error.message : String(error) }
 function notify(message: string): void {
@@ -93,6 +131,52 @@ async function equip(item: TitleItem): Promise<void> {
   } finally { busy.value = false }
 }
 
+async function doSmelt(): Promise<void> {
+  if (busy.value) return
+  const materials = Object.entries(smeltSelection.value).map(([title_id, count]) => ({ title_id, count }))
+  if (selectedTotal.value !== smeltCost.value) { notify(`请选择 ${smeltCost.value} 张材料`); return }
+  if (smeltMode.value === 'target' && !smeltTarget.value) { notify('请选择定向目标'); return }
+  busy.value = true
+  try {
+    const result = await titlesApi.smelt({
+      mode: smeltMode.value, input_rarity: smeltRarity.value,
+      target_title_id: smeltMode.value === 'target' ? smeltTarget.value : undefined,
+      materials, request_id: newRequestId(),
+    })
+    notify(`🔥 熔炼成功，获得${rarityMeta[result.output.rarity].label}「${nameMap[result.output.title_id]?.name || '称号'}」${result.output.is_new ? '（新）' : '（副本）'}`)
+    resetSmelt()
+    await refresh()
+  } catch (error) {
+    notify(`熔炼失败：${messageOf(error)}`)
+  } finally { busy.value = false }
+}
+
+function recipeNeed(recipe: { materials: string[] }): Record<string, number> {
+  const need: Record<string, number> = {}
+  for (const code of recipe.materials) need[code] = (need[code] ?? 0) + 1
+  return need
+}
+function recipeReady(recipe: { materials: string[] }): boolean {
+  return Object.entries(recipeNeed(recipe)).every(([code, n]) => {
+    const item = codeMap.value[code]
+    return !!item && availableOf(item) >= n
+  })
+}
+function recipeOutput(recipe: { output_code: string }): TitleItem | undefined { return codeMap.value[recipe.output_code] }
+
+async function doCraft(recipe: { id: string; materials: string[] }): Promise<void> {
+  if (busy.value || !recipeReady(recipe)) return
+  busy.value = true
+  try {
+    const materials = Object.entries(recipeNeed(recipe)).map(([code, count]) => ({ title_id: codeMap.value[code].id, count }))
+    const result = await titlesApi.craft({ recipe_id: recipe.id, materials, request_id: newRequestId() })
+    notify(`✨ 合成成功，获得至尊「${nameMap[result.output.title_id]?.name || 'UR'}」`)
+    await refresh()
+  } catch (error) {
+    notify(`合成失败：${messageOf(error)}`)
+  } finally { busy.value = false }
+}
+
 onMounted(async () => {
   if (await identity.requireLogin('/titles')) await refresh()
 })
@@ -141,7 +225,57 @@ onMounted(async () => {
           </div>
         </div>
 
-        <details class="card card-collapse" open>
+        <div class="card" style="margin-top:20px">
+          <h2 class="card-title" style="margin-bottom:12px">熔炼与合成</h2>
+
+          <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
+            <button class="btn-secondary" type="button" :style="smeltMode === 'random' ? { borderColor: 'var(--primary)', color: 'var(--primary)' } : {}" @click="smeltMode = 'random'; resetSmelt()">随机熔炼</button>
+            <button class="btn-secondary" type="button" :style="smeltMode === 'target' ? { borderColor: 'var(--primary)', color: 'var(--primary)' } : {}" @click="smeltMode = 'target'; resetSmelt()">定向熔炼</button>
+          </div>
+
+          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px">
+            <span style="font-size:13px;color:var(--text-muted)">材料稀有度：</span>
+            <button v-for="r in smeltRarities" :key="r" class="product-badge" type="button" :style="smeltRarity === r ? { background: rarityMeta[r].bg, color: rarityMeta[r].color, borderColor: rarityMeta[r].color } : {}" @click="smeltRarity = r; resetSmelt()">{{ rarityMeta[r].label }} · {{ r }}</button>
+          </div>
+
+          <div style="font-size:13px;color:var(--text-muted);margin-bottom:10px">需要 <strong>{{ smeltCost }}</strong> 张 {{ smeltRarity }} 材料（已选 {{ selectedTotal }}）→ 产出 {{ smeltMode === 'random' ? '随机' : '指定' }} {{ nextRarityMap[smeltRarity] }}</div>
+
+          <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px">
+            <div v-if="!smeltCandidates.length" style="font-size:13px;color:var(--text-dim)">该稀有度暂无可熔炼的副本（装备中的卡至少保留 1 张）。</div>
+            <div v-for="item in smeltCandidates" :key="item.id" style="display:flex;align-items:center;gap:6px;border:1px solid var(--border-light);border-radius:10px;padding:6px 8px">
+              <span style="font-size:12px;font-weight:700">{{ item.name }}</span>
+              <span style="font-size:11px;color:var(--text-dim)">可用 {{ item.available }}</span>
+              <button class="btn-secondary" type="button" style="padding:0 8px" @click="addMaterial(item)">＋</button>
+              <span style="font-size:12px;min-width:14px;text-align:center">{{ smeltSelection[item.id] ?? 0 }}</span>
+              <button class="btn-secondary" type="button" style="padding:0 8px" @click="subMaterial(item)">－</button>
+            </div>
+          </div>
+
+          <div v-if="smeltMode === 'target'" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px">
+            <span style="font-size:13px;color:var(--text-muted)">定向目标（{{ nextRarityMap[smeltRarity] }}）：</span>
+            <select v-model="smeltTarget" style="padding:6px 10px;border:1px solid var(--border-light);border-radius:8px;background:#fff">
+              <option value="">请选择目标</option>
+              <option v-for="item in targetCandidates" :key="item.id" :value="item.id">{{ item.name }}（副本×{{ item.copies }}）</option>
+            </select>
+          </div>
+
+          <button class="btn-primary" type="button" :disabled="busy || selectedTotal !== smeltCost || (smeltMode === 'target' && !smeltTarget)" @click="doSmelt">熔炼（{{ smeltMode === 'random' ? '随机' : '定向' }}）</button>
+
+          <div style="border-top:1px solid var(--border-light);margin:18px 0"></div>
+          <div style="font-size:13px;font-weight:700;margin-bottom:8px">UR 合成</div>
+          <div v-if="!data?.recipes?.length" style="font-size:13px;color:var(--text-dim)">暂未配置 UR 配方。</div>
+          <div v-for="recipe in data?.recipes ?? []" :key="recipe.id" style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;padding:10px;border:1px solid var(--border-light);border-radius:10px;margin-bottom:8px">
+            <div>
+              <div style="font-size:13px;font-weight:700">{{ recipeOutput(recipe)?.name || recipe.output_code }}</div>
+              <div style="font-size:12px;color:var(--text-dim);margin-top:4px">
+                需要：<span v-for="(code, index) in recipe.materials" :key="code + index">{{ index ? ' + ' : '' }}{{ codeMap[code]?.name || code }}（有 {{ codeMap[code]?.copies ?? 0 }}）</span>
+              </div>
+            </div>
+            <button class="btn-primary" type="button" style="padding:6px 14px;font-size:13px" :disabled="busy || !recipeReady(recipe)" @click="doCraft(recipe)">{{ recipeReady(recipe) ? '合成' : '材料不足' }}</button>
+          </div>
+        </div>
+
+        <details class="card card-collapse" open style="margin-top:20px">
           <summary class="collapse-summary"><h2 class="card-title">称号图鉴 <span class="card-subtitle">按稀有度分组</span></h2><span class="collapse-chevron">⌄</span></summary>
           <div class="collapse-body">
             <div v-for="group in grouped" :key="group.rarity" style="margin-bottom:14px">

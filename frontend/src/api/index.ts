@@ -179,6 +179,7 @@ export interface TitleData {
 export interface DrawInput { ticket_type: TicketType; request_id: string }
 export interface DrawData { batch: { id: string; ticket_type: TicketType; count: number }; results: Array<{ title_id: string; rarity: Rarity; is_new: boolean }>; pity: number; pity_limit: number; tickets: TicketBalances }
 export interface TicketPurchaseData { order: { order_no: string; product_name: string; points_cost: number; draw_count: number }; status: string; ticket_type: TicketType | null; tickets: TicketBalances; wallet: Wallet }
+export interface SmeltData { kind: string; output: { title_id: string; rarity: Rarity; is_new: boolean }; consumed: Array<{ title_id: string; count: number }>; collection: { copies: number } }
 
 export interface DonationLeaderboardItem { rank: number; username: string; amount: string; count: number }
 export interface DonationOrder { order_no: string; amount: string; status: 'created' | 'paid'; created_at: string; paid_at: string | null }
@@ -266,6 +267,8 @@ export const titles = {
   draw: (input: DrawInput, config?: RequestConfig) => post<DrawData>('/titles/draw', input, config),
   buyTicket: (input: { product_id: string; request_id: string }, config?: RequestConfig) => post<TicketPurchaseData>('/titles/tickets/purchase', input, config),
   equip: (input: { title_id: string | null }, config?: RequestConfig) => post<{ equipped_title_id: string | null }>('/titles/equip', input, config),
+  smelt: (input: { mode: 'random' | 'target'; input_rarity: Rarity; target_title_id?: string; materials: Array<{ title_id: string; count: number }>; request_id: string }, config?: RequestConfig) => post<SmeltData>('/titles/smelt', input, config),
+  craft: (input: { recipe_id: string; materials: Array<{ title_id: string; count: number }>; request_id: string }, config?: RequestConfig) => post<SmeltData>('/titles/craft', input, config),
 }
 export const donations = {
   get: (config?: RequestConfig) => get<DonationsData>('/donations', config),
