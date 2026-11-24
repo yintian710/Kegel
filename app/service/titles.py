@@ -462,7 +462,6 @@ async def title_view(user: dict | None) -> dict:
         state = await _state(user["id"])
         equipped = state["equipped_title_id"]
         tickets = _tickets_of(state)
-        pity = int(state["pity"])
     collection = []
     for row in defs:
         item = dict(row)
@@ -473,7 +472,7 @@ async def title_view(user: dict | None) -> dict:
         "SELECT id,name,description,points_price,draw_count FROM shop_products "
         "WHERE category='TICKET' AND is_active=1 ORDER BY draw_count")
     recipes = await _config("ur_recipes", [])
-    return {"user": user, "tickets": tickets, "pity": pity, "pity_limit": PITY_LIMIT,
+    return {"user": user, "tickets": tickets, "pity": pity, "pity_limit": 0,
             "equipped_title_id": equipped, "collection": collection,
             "ticket_products": products, "recipes": recipes,
             "wallet": await credits.wallet_view(user["id"]) if user else None,
