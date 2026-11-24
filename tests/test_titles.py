@@ -102,16 +102,31 @@ async def test_ten_pull_sr_floor_is_deterministic(client, monkeypatch):
     assert rarities == ["N"] * 9 + ["SR"]
 
 
-async def test_hard_pity_forces_ssr(client):
+async def test_hundred_guarantees_ssr(client, monkeypatch):
     await seed_pool()
     uid = 5005
-    await give_tickets(uid, "single", 1, "seed-single-5005")
-    await titles._ensure_state(str(uid))
-    await execute("UPDATE user_title_state SET pity=79 WHERE user_id=$1", str(uid))
-    code, data = await client.request("/api/titles/draw", {"ticket_type": "single", "request_id": "req-pity-5005-0001"},
+    await give_tickets(uid, "hundred", 1, "seed-hundred-5005")
+    # 关闭基础 SSR 出货（>=30），其余权重恒取第一项（N），从而只能靠百连保底补 SSR。
+    monkeypatch.setattr(titles.secrets, "randbelow", lambda n: 999 if n == 1000 else 0)
+    code, data = await client.request("/api/titles/draw", {"ticket_type": "hundred", "request_id": "req-hundred-5005-0001"},
                                       user=uid)
     assert code == 200, data
-    assert data["results"][0]["rarity"] == "SSR"
+    rarities = [item["rarity"] for item in data["results"]]
+    assert len(rarities) == 100
+    assert rarities[-1] == "SSR"
+    assert rarities.count("SSR") == 1
+    assert data["pity"] == 0
+
+
+async def test_single_has_no_guarantee(client, monkeypatch):
+    await seed_pool()
+    uid = 5009
+    await give_tickets(uid, "single", 1, "seed-single-5009")
+    monkeypatch.setattr(titles.secrets, "randbelow", lambda n: 999 if n == 1000 else 0)
+    code, data = await client.request("/api/titles/draw", {"ticket_type": "single", "request_id": "req-single-5009-0001"},
+                                      user=uid)
+    assert code == 200, data
+    assert data["results"][0]["rarity"] in ("N", "R", "SR")
     assert data["pity"] == 0
 
 

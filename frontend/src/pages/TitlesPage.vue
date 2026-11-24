@@ -37,8 +37,6 @@ const grouped = computed(() => rarityOrder.map((rarity) => ({
   items: (data.value?.collection ?? []).filter((item) => item.rarity === rarity),
   owned: (data.value?.collection ?? []).filter((item) => item.rarity === rarity && item.owned).length,
 })))
-const pityLimit = computed(() => data.value?.pity_limit ?? 80)
-const pityPercent = computed(() => Math.min(100, Math.round(((data.value?.pity ?? 0) / pityLimit.value) * 100)))
 const wallet = computed(() => Number(data.value?.wallet?.balance ?? 0))
 
 function messageOf(error: unknown): string { return error instanceof Error ? error.message : String(error) }
@@ -118,8 +116,7 @@ onMounted(async () => {
           <div style="font-size:22px;font-weight:800">{{ data?.tickets?.[t.type] ?? 0 }}</div>
         </div>
       </div>
-      <div style="font-size:13px;color:var(--text-muted);margin-bottom:6px">SSR 保底进度：{{ data?.pity ?? 0 }} / {{ pityLimit }}（第 71 抽起概率提升，80 抽必出 SSR）</div>
-      <div style="height:10px;background:#eef2f7;border-radius:99px;overflow:hidden"><div :style="{ width: pityPercent + '%', height: '100%', background: 'linear-gradient(90deg,#7c3aed,#a855f7)' }"></div></div>
+      <div style="font-size:13px;color:var(--text-muted)">保底规则：<strong>十连必出 SR 及以上</strong>；<strong>百连必出 SSR</strong>；单抽无保底。</div>
     </div>
 
     <div class="shop-columns">
@@ -187,8 +184,7 @@ onMounted(async () => {
           <h2 class="card-title" style="margin-bottom:10px">概率公示</h2>
           <ul style="font-size:13px;color:var(--text-muted);line-height:1.8;margin:0;padding-left:18px">
             <li>N 普通 60%，R 稀有 28%，SR 史诗 9%，SSR 传说 3%，UR 仅合成获得。</li>
-            <li>SSR 硬保底 80 抽；第 71 抽起概率线性提升。</li>
-            <li>每 10 连保底 SR，综合 SR 约 11.8%。</li>
+            <li>保底：十连必出 SR 及以上；百连必出 SSR；单抽及其他无保底。</li>
             <li>称号不可交易、赠送或兑换积分；UR 拥有即享 LDC 兑换 95 折。</li>
           </ul>
         </div>

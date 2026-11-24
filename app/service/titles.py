@@ -120,12 +120,9 @@ def _pick_weighted(rows: list[dict]) -> dict:
     return rows[-1]
 
 
-def _choose_rarity(pity: int, pools: dict[str, list[dict]]) -> str:
-    has_ssr = bool(pools.get("SSR"))
-    if has_ssr:
-        chance = 30 + max(0, pity - SOFT_PITY_START) * 97  # 千分比；80 抽时 >=1000
-        if chance >= 1000 or secrets.randbelow(1000) < chance:
-            return "SSR"
+def _choose_rarity(pools: dict[str, list[dict]]) -> str:
+    if pools.get("SSR") and secrets.randbelow(1000) < 30:  # 基础 SSR 3%
+        return "SSR"
     options = [(r, BASE_WEIGHT[r]) for r in ("N", "R", "SR") if pools.get(r)]
     total = sum(w for _, w in options)
     roll = secrets.randbelow(total)
@@ -182,20 +179,15 @@ async def draw(user: dict, body: dict) -> dict:
         batch_id = next_id()
         await execute("INSERT INTO title_draw_batches(id,user_id,request_id,ticket_type,count,created_at) "
                       "VALUES ($1,$2,$3,$4,$5,$6)", batch_id, user["id"], request_id, ticket_type, count, now)
-        pity = int(state["pity"])
         results: list[dict] = []
-        for i in range(count):
-            pity_before = pity
-            pity += 1
-            rarity = _choose_rarity(pity, pools)
-            if rarity == "SSR":
-                pity = 0
-            results.append({"rarity": rarity, "pity_before": pity_before})
-        # 每 10 抽区块 SR 保底（最后一抽强制 SR；若已是 SSR 保留）
-        for block_start in range(0, count, 10):
-            block = results[block_start:block_start + 10]
-            if block and all(item["rarity"] in ("N", "R") for item in block) and pools.get("SR"):
-                block[-1]["rarity"] = "SR"
+        for _ in range(count):
+            results.append({"rarity": _choose_rarity(pools)})
+        # 保底：十连必出 SR 及以上（无则末抽 SR）；百连必出 SSR（无则末抽 SSR）；单抽无保底。
+        rarities = [item["rarity"] for item in results]
+        if ticket_type == "ten" and pools.get("SR") and all(r in ("N", "R") for r in rarities):
+            results[-1]["rarity"] = "SR"
+        if ticket_type == "hundred" and pools.get("SSR") and all(r != "SSR" for r in rarities):
+            results[-1]["rarity"] = "SSR"
         serialized: list[dict] = []
         for item in results:
             pool = pools.get(item["rarity"]) or []
@@ -206,15 +198,14 @@ async def draw(user: dict, body: dict) -> dict:
             await execute(
                 "INSERT INTO title_draws(id,batch_id,user_id,title_id,rarity,is_new,pity_before,created_at) "
                 "VALUES ($1,$2,$3,$4,$5,$6,$7,$8)",
-                next_id(), batch_id, user["id"], picked["id"], item["rarity"], int(is_new),
-                item["pity_before"], now)
+                next_id(), batch_id, user["id"], picked["id"], item["rarity"], int(is_new), 0, now)
             serialized.append({"title_id": picked["id"], "rarity": item["rarity"], "is_new": is_new})
         await _ticket_apply(user["id"], ticket_type, -1, "draw", str(batch_id), now)
-        await execute("UPDATE user_title_state SET pity=$1,total_draws=total_draws+$2 WHERE user_id=$3",
-                      pity, count, user["id"])
+        await execute("UPDATE user_title_state SET pity=0,total_draws=total_draws+$1 WHERE user_id=$2",
+                      count, user["id"])
         state = await _state(user["id"])
     return {"batch": {"id": batch_id, "ticket_type": ticket_type, "count": count},
-            "results": serialized, "pity": int(state["pity"]), "pity_limit": PITY_LIMIT,
+            "results": serialized, "pity": 0, "pity_limit": 0,
             "tickets": _tickets_of(state)}
 
 
@@ -223,7 +214,7 @@ async def _batch_result(user_id: str, batch: dict) -> dict:
     state = await _state(user_id)
     return {"batch": {"id": batch["id"], "ticket_type": batch["ticket_type"], "count": batch["count"]},
             "results": [{"title_id": r["title_id"], "rarity": r["rarity"], "is_new": bool(r["is_new"])} for r in rows],
-            "pity": int(state["pity"]), "pity_limit": PITY_LIMIT, "tickets": _tickets_of(state)}
+            "pity": 0, "pity_limit": 0, "tickets": _tickets_of(state)}
 
 
 # ── 购券 ──────────────────────────────────────────────────────────────────────
