@@ -65,18 +65,6 @@ async function refresh(): Promise<void> {
   } finally { loading.value = false }
 }
 
-async function buyTicket(productId: string, label: string): Promise<void> {
-  if (busy.value) return
-  busy.value = true
-  try {
-    const result = await titlesApi.buyTicket({ product_id: productId, request_id: newRequestId() })
-    notify(`✅ 已购买${label}，花费 ${result.order.points_cost} 积分`)
-    await refresh()
-  } catch (error) {
-    notify(`购买失败：${messageOf(error)}`)
-  } finally { busy.value = false }
-}
-
 async function draw(type: TicketType): Promise<void> {
   if (busy.value) return
   const owned = data.value?.tickets?.[type] ?? 0
@@ -186,20 +174,14 @@ onMounted(async () => {
       </div>
 
       <div>
-        <details class="card card-collapse" open>
-          <summary class="collapse-summary"><div><h2 class="card-title">购买抽卡券</h2><span class="card-subtitle">用站内积分购买，价格可在后台配置</span></div><span class="collapse-chevron">⌄</span></summary>
-          <div class="collapse-body">
-            <div class="products-grid">
-              <div v-if="!data?.ticket_products?.length" class="products-empty"><div style="font-size:32px;margin-bottom:8px">🎟️</div>暂无券商品，管理员可在后台添加 TICKET 品类商品。</div>
-              <article v-for="item in data?.ticket_products ?? []" :key="item.id" class="product-card">
-                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px"><span class="product-badge">抽卡券</span><span style="font-size:13px;font-weight:700;color:var(--emerald)">{{ item.draw_count }} 抽</span></div>
-                <h3 class="product-name">{{ item.name }}</h3>
-                <p class="product-desc">{{ item.description || `购买后可进行 ${item.draw_count} 次抽卡。` }}</p>
-                <div class="product-footer"><span class="product-price">{{ item.points_price }} 积分</span><button class="btn-primary" type="button" style="padding:6px 14px;font-size:13px" :disabled="busy || wallet < item.points_price" @click="buyTicket(item.id, item.name)">{{ wallet < item.points_price ? '积分不足' : '购买' }}</button></div>
-              </article>
-            </div>
+        <div class="card">
+          <h2 class="card-title" style="margin-bottom:10px">抽卡券购买</h2>
+          <p style="font-size:13px;color:var(--text-muted);line-height:1.7;margin:0 0 14px">抽卡券和 LDC 一样属于商店商品，只是品类不同；请到「商店」购买单抽券 / 十连券 / 百连券。</p>
+          <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px">
+            <span v-for="t in ticketMeta" :key="t.type" class="product-badge">{{ t.label }} ×{{ data?.tickets?.[t.type] ?? 0 }}</span>
           </div>
-        </details>
+          <RouterLink class="btn-primary" to="/shop">前往商店购买抽卡券 →</RouterLink>
+        </div>
 
         <div class="card" style="margin-top:20px">
           <h2 class="card-title" style="margin-bottom:10px">概率公示</h2>

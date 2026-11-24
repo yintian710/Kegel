@@ -112,6 +112,7 @@ export interface Product {
   total_remaining: number | null
   user_today_count: number
   user_remaining: number | null
+  draw_count?: number
 }
 export interface Purchase {
   order_no: string
