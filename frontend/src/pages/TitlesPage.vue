@@ -52,6 +52,7 @@ const smeltMode = ref<'random' | 'target'>('random')
 const smeltRarity = ref<Rarity>('N')
 const smeltSelection = ref<Record<string, number>>({})
 const smeltTarget = ref('')
+const smeltDialog = ref<HTMLDialogElement | null>(null)
 const smeltCost = computed(() => smeltCostMap[smeltRarity.value][smeltMode.value])
 const smeltCandidates = computed(() => (data.value?.collection ?? [])
   .filter((item) => item.rarity === smeltRarity.value && availableOf(item) > 0)
@@ -75,6 +76,15 @@ function subMaterial(item: TitleItem): void {
   if (current <= 1) delete next[item.id]
   else next[item.id] = current - 1
   smeltSelection.value = next
+}
+function removeMaterial(item: TitleItem): void {
+  const next = { ...smeltSelection.value }
+  delete next[item.id]
+  smeltSelection.value = next
+}
+function openSmeltPicker(): void {
+  if (!smeltCandidates.value.length) { notify('该稀有度暂无可熔炼的副本'); return }
+  smeltDialog.value?.showModal()
 }
 
 function messageOf(error: unknown): string { return error instanceof Error ? error.message : String(error) }
@@ -240,15 +250,14 @@ onMounted(async () => {
 
           <div style="font-size:13px;color:var(--text-muted);margin-bottom:10px">需要 <strong>{{ smeltCost }}</strong> 张 {{ smeltRarity }} 材料（已选 {{ selectedTotal }}）→ 产出 {{ smeltMode === 'random' ? '随机' : '指定' }} {{ nextRarityMap[smeltRarity] }}</div>
 
-          <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px">
-            <div v-if="!smeltCandidates.length" style="font-size:13px;color:var(--text-dim)">该稀有度暂无可熔炼的副本（装备中的卡至少保留 1 张）。</div>
-            <div v-for="item in smeltCandidates" :key="item.id" style="display:flex;align-items:center;gap:6px;border:1px solid var(--border-light);border-radius:10px;padding:6px 8px">
-              <span style="font-size:12px;font-weight:700">{{ item.name }}</span>
-              <span style="font-size:11px;color:var(--text-dim)">可用 {{ item.available }}</span>
-              <button class="btn-secondary" type="button" style="padding:0 8px" @click="addMaterial(item)">＋</button>
-              <span style="font-size:12px;min-width:14px;text-align:center">{{ smeltSelection[item.id] ?? 0 }}</span>
-              <button class="btn-secondary" type="button" style="padding:0 8px" @click="subMaterial(item)">－</button>
-            </div>
+          <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:12px">
+            <span style="font-size:13px;color:var(--text-muted)">已选材料：</span>
+            <span v-if="!selectedTotal" style="font-size:13px;color:var(--text-dim)">尚未选择，点击右侧按钮挑选</span>
+            <span v-for="(count, titleId) in smeltSelection" :key="titleId" style="display:flex;align-items:center;gap:6px;border:1px solid var(--border-light);border-radius:10px;padding:4px 8px;font-size:12px;font-weight:700">
+              {{ nameMap[titleId]?.name || titleId }} ×{{ count }}
+              <button class="btn-secondary" type="button" style="padding:0 6px" @click="removeMaterial(nameMap[titleId])">×</button>
+            </span>
+            <button class="btn-secondary" type="button" style="padding:4px 12px" @click="openSmeltPicker">＋ 选择材料</button>
           </div>
 
           <div v-if="smeltMode === 'target'" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px">
@@ -325,6 +334,25 @@ onMounted(async () => {
       </div>
     </div>
   </main>
+  <dialog ref="smeltDialog" class="dialog-modal">
+    <div style="width:min(720px,86vw)">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+        <h2 style="font-size:18px;font-weight:700;margin:0">选择熔炼材料 · {{ smeltRarity }}</h2>
+        <span style="font-size:13px;color:var(--text-muted)">已选 {{ selectedTotal }} / {{ smeltCost }}</span>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px;max-height:60vh;overflow:auto">
+        <button v-for="item in smeltCandidates" :key="item.id" type="button" :disabled="(smeltSelection[item.id] ?? 0) >= item.available" @click="addMaterial(item)"
+          :style="{ borderColor: (smeltSelection[item.id] ?? 0) > 0 ? rarityMeta[item.rarity].color : '#e5e7eb', background: (smeltSelection[item.id] ?? 0) > 0 ? rarityMeta[item.rarity].bg : '#fff', opacity: (smeltSelection[item.id] ?? 0) >= item.available ? .5 : 1 }"
+          style="border:1.5px solid;border-radius:10px;padding:10px;text-align:left;cursor:pointer">
+          <div style="font-size:13px;font-weight:700">{{ item.name }}</div>
+          <div style="font-size:11px;color:var(--text-dim);margin-top:2px">可用 {{ item.available }}<span v-if="(smeltSelection[item.id] ?? 0) > 0"> · 已选 {{ smeltSelection[item.id] }}</span></div>
+        </button>
+      </div>
+      <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:16px">
+        <button class="btn-secondary" type="button" @click="smeltDialog?.close()">完成</button>
+      </div>
+    </div>
+  </dialog>
   <div v-if="notice" class="toast-notice" role="status" aria-live="polite">{{ notice }}</div>
 </template>
 
