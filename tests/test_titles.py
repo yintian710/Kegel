@@ -203,3 +203,30 @@ async def test_equip_requires_ownership(client):
     n_id = (await fetch_one("SELECT id FROM title_defs WHERE code='N-01'"))["id"]
     code, data = await client.request("/api/titles/equip", {"title_id": str(n_id)}, user=uid)
     assert code == 200 and data["equipped_title_id"] == str(n_id)
+
+
+async def test_owned_cards_do_not_affect_draw(client, monkeypatch):
+    """已拥有的卡不改变抽卡：仍可能再次抽到，记为重复副本。"""
+    await seed_pool()
+    uid = 5010
+    await give_title_copies(uid, "SR-01", 1)
+    await give_tickets(uid, "single", 1, "seed-single-5010")
+    sr_id = (await fetch_one("SELECT id FROM title_defs WHERE code='SR-01'"))["id"]
+
+    def fake(n):
+        if n == 1000:
+            return 999  # 不触发 SSR
+        if n == 97:
+            return 96   # 在 N/R/SR 权重中命中 SR
+        return 0        # 其余权重选择取第一项
+
+    monkeypatch.setattr(titles.secrets, "randbelow", fake)
+    code, data = await client.request("/api/titles/draw", {"ticket_type": "single", "request_id": "req-owned-5010-0001"},
+                                      user=uid)
+    assert code == 200, data
+    result = data["results"][0]
+    assert result["rarity"] == "SR"
+    assert result["title_id"] == str(sr_id)   # 已拥有的卡照样会被抽到
+    assert result["is_new"] is False          # 记为重复副本
+    row = await fetch_one("SELECT copies FROM user_titles WHERE user_id=$1 AND title_id=$2", str(uid), sr_id)
+    assert row["copies"] == 2
