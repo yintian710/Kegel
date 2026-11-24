@@ -244,14 +244,17 @@ async def purchase_ticket(user: dict, body: dict) -> dict:
         if ticket_type is None:
             raise APIError("券商品配置错误", 503)
         order_no = f"TO-{day.replace('-', '')}-{secrets.token_hex(6).upper()}"
-        await credits.spend_points(user, int(product["points_price"]), "ticket_purchase", order_no, now)
+        from app.service import catalog as _catalog
+        original, points_cost, used_bp, saved = await _catalog.price_with_discount(product, user["id"], day)
+        await credits.spend_points(user, points_cost, "ticket_purchase", order_no, now)
         await _ticket_apply(user["id"], ticket_type, 1, "purchase", order_no, now)
         await execute(
             "INSERT INTO shop_purchases(order_no,product_id,category,product_name,user_id,username,points_cost,"
-            "ldc_amount,status,trade_no,error,created_at,day,request_id,draw_count) "
-            "VALUES ($1,$2,'TICKET',$3,$4,$5,$6,'0.00','success','','',$7,$8,$9,$10)",
-            order_no, product_id, product["name"], user["id"], user["username"], product["points_price"],
-            now, day, request_id, draw_count)
+            "points_cost_original,points_discount_bp,points_discount_saved,ldc_amount,status,trade_no,error,"
+            "created_at,day,request_id,draw_count) "
+            "VALUES ($1,$2,'TICKET',$3,$4,$5,$6,$7,$8,$9,'0.00','success','','',$10,$11,$12,$13)",
+            order_no, product_id, product["name"], user["id"], user["username"], points_cost, original,
+            used_bp, saved, now, day, request_id, draw_count)
         order = await fetch_one("SELECT * FROM shop_purchases WHERE order_no=$1", order_no)
         state = await _state(user["id"])
         wallet = await credits.wallet_view(user["id"])
@@ -269,6 +272,9 @@ async def _purchase_result(user_id: str, order: dict) -> dict:
 def _order_view(order: dict) -> dict:
     return {"order_no": order["order_no"], "category": order["category"], "product_id": order["product_id"],
             "product_name": order["product_name"], "points_cost": order["points_cost"],
+            "points_cost_original": order.get("points_cost_original") or order["points_cost"],
+            "points_discount_bp": order.get("points_discount_bp", 10000),
+            "points_discount_saved": order.get("points_discount_saved", 0),
             "draw_count": order.get("draw_count", 0), "status": order["status"],
             "created_at": timeutil.iso_time(order["created_at"])}
 

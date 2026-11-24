@@ -113,6 +113,8 @@ export interface Product {
   user_today_count: number
   user_remaining: number | null
   draw_count?: number
+  discount_eligible?: number
+  special_discount_bp?: number | null
 }
 export interface Purchase {
   order_no: string

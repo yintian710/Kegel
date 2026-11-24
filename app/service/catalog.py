@@ -19,7 +19,8 @@ _AMOUNT_RE = re.compile(r"^(0|[1-9][0-9]{0,4})(?:\.([0-9]{1,2}))?$")
 _REQUEST_ID_RE = re.compile(r"[A-Za-z0-9_-]{16,128}")
 _HOLDING = "('pending', 'success', 'simulated', 'uncertain')"
 _PRODUCT_FIELDS = {"id", "category", "name", "description", "points_price", "ldc_amount", "user_daily_limit",
-                   "total_daily_limit", "is_active", "draw_count", "secondary_secret", "secondary_password"}
+                   "total_daily_limit", "is_active", "draw_count", "discount_eligible", "special_discount_bp",
+                   "secondary_secret", "secondary_password"}
 NO_PAYOUT_KEY = "no_payout_user_ids"
 
 
@@ -123,9 +124,21 @@ async def save(body: dict) -> dict:
     active = body.get("is_active")
     if type(active) is not bool:
         raise APIError("需指定商品是否上架")
+    discount_eligible = 1 if body.get("discount_eligible", True) else 0
+    special_raw = body.get("special_discount_bp")
+    if special_raw in (None, ""):
+        special_discount_bp = None
+    else:
+        try:
+            special_discount_bp = int(special_raw)
+        except (TypeError, ValueError):
+            raise APIError("特价折扣须为 1000–10000 的整数") from None
+        if not 1000 <= special_discount_bp <= 10000:
+            raise APIError("特价折扣须为 1000–10000 的整数")
     values = {"category": category, "name": name.strip(), "description": description.strip(),
               "points_price": price, "ldc_amount": ldc_amount, "user_daily_limit": user_limit,
-              "total_daily_limit": total_limit, "is_active": int(active), "draw_count": draw_count}
+              "total_daily_limit": total_limit, "is_active": int(active), "draw_count": draw_count,
+              "discount_eligible": discount_eligible, "special_discount_bp": special_discount_bp}
     async with write_txn():
         if body.get("id") is None:
             product_id = (await ShopProduct.create(**values)).id
@@ -192,8 +205,32 @@ async def best_discount_bp(user_id: str) -> int:
 async def discount_saved_today(user_id: str, today: str) -> int:
     row = await fetch_one(
         f"SELECT COALESCE(SUM(points_discount_saved),0) AS s FROM shop_purchases "
-        f"WHERE user_id=$1 AND day=$2 AND category='LDC' AND status IN {_HOLDING}", user_id, today)
+        f"WHERE user_id=$1 AND day=$2 AND status IN {_HOLDING}", user_id, today)
     return int(row["s"])
+
+
+async def price_with_discount(product: dict, user_id: str, today: str) -> tuple[int, int, int, int]:
+    """返回 (原价, 实付, 使用的折扣 bp, 实际节省)。整个商店通用：
+    - discount_eligible=0：不打折；
+    - 特价商品 special_discount_bp 非空：用自身特价，不与称号折扣叠加；
+    - 否则：用用户最优称号折扣；
+    - 折扣受 DAILY_DISCOUNT_SAVE_CAP 每日节省上限约束（可为部分折扣）。
+    """
+    original = int(product["points_price"])
+    bp = 10000
+    special = product.get("special_discount_bp")
+    if special is not None:
+        bp = int(special)
+    elif int(product.get("discount_eligible", 1)) == 1:
+        bp = await best_discount_bp(user_id)
+    cost, used_bp, saved = original, 10000, 0
+    if bp < 10000:
+        desired = original - (original * bp + 9999) // 10000
+        cap_left = max(0, Settings.DAILY_DISCOUNT_SAVE_CAP - await discount_saved_today(user_id, today))
+        saved = min(desired, cap_left)
+        cost = original - saved
+        used_bp = bp if saved > 0 else 10000
+    return original, cost, used_bp, saved
 
 
 async def discount_view(user_id: str | None, today: str) -> dict:
@@ -239,15 +276,7 @@ async def _reserve(user: dict, product_id: int, today: str, now: float, request_
             raise ValueError(f"今日全站 LDC 兑换额度不足：剩余 {remaining:.2f} LDC，"
                              f"本次兑换 {product['ldc_amount']} LDC；不支持拆分兑换")
         order_no = f"SO-{today.replace('-', '')}-{secrets.token_hex(6).upper()}"
-        original = int(product["points_price"])
-        points_cost, used_bp, saved = original, 10000, 0
-        discount_bp = await best_discount_bp(user["id"])
-        if discount_bp < 10000:
-            desired = original - (original * discount_bp + 9999) // 10000
-            cap_left = max(0, Settings.DAILY_DISCOUNT_SAVE_CAP - await discount_saved_today(user["id"], today))
-            saved = min(desired, cap_left)
-            points_cost = original - saved
-            used_bp = discount_bp if saved > 0 else 10000
+        original, points_cost, used_bp, saved = await price_with_discount(product, user["id"], today)
         await credits.spend_points(user, points_cost, "shop_purchase", order_no, now)
         await ShopPurchase.create(order_no=order_no, product_id=product_id, category=product["category"],
                                   product_name=product["name"], user_id=user["id"], username=user["username"],

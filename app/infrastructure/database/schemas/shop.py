@@ -17,6 +17,8 @@ class ShopProduct(Model):
     total_daily_limit = fields.IntField(default=0)
     is_active = fields.IntField()
     draw_count = fields.IntField(default=0)
+    discount_eligible = fields.IntField(default=1)
+    special_discount_bp = fields.IntField(null=True)
 
     class Meta:
         table = "shop_products"

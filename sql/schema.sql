@@ -269,6 +269,9 @@ CREATE TABLE IF NOT EXISTS title_config (
 
 -- 券商品复用 shop_products（category='TICKET'，draw_count 标面额）；订单快照与折扣审计字段。
 ALTER TABLE shop_products ADD COLUMN IF NOT EXISTS draw_count INTEGER NOT NULL DEFAULT 0;
+-- 是否可享称号折扣（1=可，0=不可打折）；特价商品预留 special_discount_bp（非空则用自身特价，不与称号折扣叠加）。
+ALTER TABLE shop_products ADD COLUMN IF NOT EXISTS discount_eligible INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE shop_products ADD COLUMN IF NOT EXISTS special_discount_bp INTEGER;
 ALTER TABLE shop_purchases ADD COLUMN IF NOT EXISTS draw_count INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE shop_purchases ADD COLUMN IF NOT EXISTS points_cost_original BIGINT;
 ALTER TABLE shop_purchases ADD COLUMN IF NOT EXISTS points_discount_bp INTEGER NOT NULL DEFAULT 10000;

@@ -281,3 +281,29 @@ async def test_ur_discount_applies_to_ldc_purchase(client, monkeypatch):
     assert order["points_discount_bp"] == 9500
     code, shop = await client.request("/api/shop", user=1)
     assert shop["discount"]["bp"] == 9500 and shop["discount"]["saved_today"] == 50
+
+
+async def test_discount_covers_tickets_and_skips_non_eligible(client, monkeypatch):
+    from app.service import titles
+    await titles.admin_save({"code": "UR-TEST2", "rarity": "UR", "weight": 1, "name": "折扣UR2", "discount_bp": 9500})
+    ur_id = (await fetch("SELECT id FROM title_defs WHERE code='UR-TEST2'"))[0]["id"]
+    await execute("INSERT INTO user_titles(user_id,title_id,copies,first_obtained_at,last_obtained_at) "
+                  "VALUES ('1',$1,1,0,0) ON CONFLICT(user_id,title_id) DO UPDATE SET copies=1", ur_id)
+    await seed_wallet(1, 10000)
+    # 抽卡券（TICKET）也应享折扣：100 -> 95
+    code, created = await client.request("/api/admin/products", {
+        "category": "TICKET", "name": "单抽券", "description": "", "points_price": 100, "draw_count": 1,
+        "is_active": True, "secondary_secret": SECONDARY_SECRET}, admin=True)
+    assert code == 200, created
+    ticket_id = created["product"]["id"]
+    code, bought = await client.request("/api/titles/tickets/purchase",
+                                         {"product_id": ticket_id, "request_id": "req-ticket-disc-0001"}, user=1)
+    assert code == 200, bought
+    assert bought["order"]["points_cost"] == 95
+    assert bought["order"]["points_discount_saved"] == 5
+    # 不可打折商品：不打折
+    product_id = await make_product(client, "1.00", 100, discount_eligible=False)
+    code, result = await buy(client, 1, product_id, "req-nodisc-0001-0001")
+    assert code == 200, result
+    assert result["order"]["points_cost"] == 100
+    assert result["order"]["points_discount_saved"] == 0
