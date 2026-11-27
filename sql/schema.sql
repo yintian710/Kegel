@@ -272,6 +272,11 @@ ALTER TABLE shop_products ADD COLUMN IF NOT EXISTS draw_count INTEGER NOT NULL D
 -- 是否可享称号折扣（1=可，0=不可打折）；特价商品预留 special_discount_bp（非空则用自身特价，不与称号折扣叠加）。
 ALTER TABLE shop_products ADD COLUMN IF NOT EXISTS discount_eligible INTEGER NOT NULL DEFAULT 1;
 ALTER TABLE shop_products ADD COLUMN IF NOT EXISTS special_discount_bp INTEGER;
+-- 限时折扣：开关 + 折扣力度（bp，8000=8 折）+ 结束时间（epoch 秒）；与称号折扣叠加。
+ALTER TABLE shop_products ADD COLUMN IF NOT EXISTS promo_enabled INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE shop_products ADD COLUMN IF NOT EXISTS promo_bp INTEGER;
+ALTER TABLE shop_products ADD COLUMN IF NOT EXISTS promo_ends_at DOUBLE PRECISION;
+ALTER TABLE shop_purchases ADD COLUMN IF NOT EXISTS points_promo_saved BIGINT NOT NULL DEFAULT 0;
 ALTER TABLE shop_purchases ADD COLUMN IF NOT EXISTS draw_count INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE shop_purchases ADD COLUMN IF NOT EXISTS points_cost_original BIGINT;
 ALTER TABLE shop_purchases ADD COLUMN IF NOT EXISTS points_discount_bp INTEGER NOT NULL DEFAULT 10000;

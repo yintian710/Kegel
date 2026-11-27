@@ -11,10 +11,19 @@ export {}
 /* prettier-ignore */
 declare module 'vue' {
   export interface GlobalComponents {
+    AdminConfirm: typeof import('./components/AdminConfirm.vue')['default']
+    AdminCreditDialog: typeof import('./components/AdminCreditDialog.vue')['default']
+    AdminDashboard: typeof import('./components/AdminDashboard.vue')['default']
+    AdminIcon: typeof import('./components/AdminIcon.vue')['default']
+    AdminLogs: typeof import('./components/AdminLogs.vue')['default']
+    AdminModal: typeof import('./components/AdminModal.vue')['default']
     AdminOverview: typeof import('./components/AdminOverview.vue')['default']
+    AdminProductDrawer: typeof import('./components/AdminProductDrawer.vue')['default']
     AdminProducts: typeof import('./components/AdminProducts.vue')['default']
     AdminRecords: typeof import('./components/AdminRecords.vue')['default']
     AdminRules: typeof import('./components/AdminRules.vue')['default']
+    AdminShop: typeof import('./components/AdminShop.vue')['default']
+    AdminUsers: typeof import('./components/AdminUsers.vue')['default']
     NConfigProvider: typeof import('naive-ui')['NConfigProvider']
     NDialogProvider: typeof import('naive-ui')['NDialogProvider']
     NMessageProvider: typeof import('naive-ui')['NMessageProvider']
@@ -22,6 +31,7 @@ declare module 'vue' {
     PreferencesPanel: typeof import('./components/PreferencesPanel.vue')['default']
     RouterLink: typeof import('vue-router')['RouterLink']
     RouterView: typeof import('vue-router')['RouterView']
+    ScrollTable: typeof import('./components/ScrollTable.vue')['default']
     SiteNavigation: typeof import('./components/SiteNavigation.vue')['default']
   }
 }

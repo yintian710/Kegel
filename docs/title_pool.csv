@@ -1,0 +1,112 @@
+code,name,name_original,description,rarity,weight,discount_bp,is_active,is_limited,is_smeltable,source_type,badge_id,grant_count,scarcity,icon,source_url
+li_badge_130,破界者,破界者,让我们一起来破界吧！,UR,1,9500,1,1,0,badge,130,2,91,fa/solid_hammer.svg,https://linux.do/badges/130/-
+li_badge_113,海纳百川,海纳百川,论坛百日纪念。,UR,1,9500,1,1,0,badge,113,12882,21,fa/solid_water.svg,https://linux.do/badges/113/-
+li_badge_114,浴火重生,浴火重生,打不死我们的，会让我们更强大！,UR,1,9500,1,1,0,badge,114,15643,19,custom/114.png,https://linux.do/badges/114/-
+li_badge_4,领袖,Leader,解锁全局编辑、置顶、关闭、归档、拆分合并和更多点赞额度。,UR,1,9500,1,0,0,badge,4,12,79,fa/solid_user.svg,https://linux.do/badges/4/-
+li_badge_104,金笔杆,金笔杆,论坛征文活动第 1 名专属徽章。,SSR,1,10000,1,1,1,badge,104,0,100,fa/solid_pencil.svg,https://linux.do/badges/104/-
+li_badge_129,非凡贡献者,Amazing Contributor,向社区开源项目提交 250 个被接受的 PR。,SSR,1,10000,1,0,1,badge,129,0,100,fa/brands_git-alt.svg,https://linux.do/badges/129/-
+li_badge_112,解题家,Solution Institution,150 条回复被标记为解决方案。,SSR,1,10000,1,0,1,badge,112,32,71,fa/solid_square-check.svg,https://linux.do/badges/112/-
+li_badge_39,共情者,Empathetic,500 篇帖子被赞，且给出 1000 个赞。,SSR,1,10000,1,0,1,badge,39,1048,42,fa/solid_heart.svg,https://linux.do/badges/39/-
+li_badge_47,虔行者,Devotee,连续访问 365 天。,SSR,1,10000,1,0,1,badge,47,1081,42,fa/regular_eye.svg,https://linux.do/badges/47/-
+li_badge_120,元气满满,元气满满,在人生重要时刻身着元气战袍，留下美好回忆。,SSR,1,10000,1,0,1,badge,120,2,91,fa/solid_angles-up.svg,https://linux.do/badges/120/-
+li_badge_136,远见者,Visionary,主题获得 25 票。,SSR,1,10000,1,0,1,badge,136,87,63,fa/solid_chevron-up.svg,https://linux.do/badges/136/-
+li_badge_105,银笔杆,银笔杆,论坛征文活动第 2 名专属徽章。,SR,1,10000,1,1,1,badge,105,24,73,fa/solid_pencil.svg,https://linux.do/badges/105/-
+li_badge_106,铜笔杆,铜笔杆,论坛征文活动第 3 名专属徽章。,SR,1,10000,1,1,1,badge,106,0,100,fa/solid_pencil.svg,https://linux.do/badges/106/-
+li_badge_20,卓越主题,Great Topic,单个主题获得 50 个赞。,SR,1,10000,1,0,1,badge,20,17914,18,fa/solid_file-signature.svg,https://linux.do/badges/20/-
+li_badge_123,卓越提交者,Amazing Committer,为社区开源项目贡献 250 次提交。,SR,1,10000,1,0,1,badge,123,0,100,fa/solid_certificate.svg,https://linux.do/badges/123/-
+li_badge_128,杰出贡献者,Great Contributor,向社区开源项目提交 25 个被接受的 PR。,SR,1,10000,1,0,1,badge,128,6,84,fa/brands_git-alt.svg,https://linux.do/badges/128/-
+li_badge_122,常驻提交者,Frequent Committer,为社区开源项目贡献 25 次提交。,SR,1,10000,1,0,1,badge,122,3,88,fa/solid_certificate.svg,https://linux.do/badges/122/-
+li_badge_111,万事通,Know-it-All,50 条回复被标记为解决方案。,SR,1,10000,1,0,1,badge,111,100,61,fa/solid_square-check.svg,https://linux.do/badges/111/-
+li_badge_110,向导,Guidance Counsellor,10 条回复被标记为解决方案。,SR,1,10000,1,0,1,badge,110,824,44,fa/solid_square-check.svg,https://linux.do/badges/110/-
+li_badge_109,破题者,Solved!,回复被标记为解决方案。,SR,1,10000,1,0,1,badge,109,18602,18,fa/solid_square-check.svg,https://linux.do/badges/109/-
+li_badge_31,仰慕者,Admired,300 篇帖子各获得至少 5 个赞。,SR,1,10000,1,0,1,badge,31,194,56,fa/solid_heart.svg,https://linux.do/badges/31/-
+li_badge_37,敬重者,Respected,100 篇帖子各获得至少 2 个赞。,SR,1,10000,1,0,1,badge,37,4126,30,fa/solid_heart.svg,https://linux.do/badges/37/-
+li_badge_36,知己,Appreciated,20 篇帖子各获得至少 1 个赞。,SR,1,10000,1,0,1,badge,36,39098,12,fa/solid_heart.svg,https://linux.do/badges/36/-
+li_badge_46,资深爱好者,Aficionado,连续访问 100 天。,SR,1,10000,1,0,1,badge,46,14256,20,fa/regular_eye.svg,https://linux.do/badges/46/-
+li_badge_24,周年,Anniversary,成为活跃成员满一年，且至少发过一帖。,SR,1,10000,1,0,1,badge,24,85782,5,fa/solid_cake-candles.svg,https://linux.do/badges/24/-
+li_badge_45,狂热者,Enthusiast,连续访问 10 天。,SR,1,10000,1,0,1,badge,45,87325,5,fa/regular_eye.svg,https://linux.do/badges/45/-
+li_badge_44,月度新人,New User of the Month,首月表现突出的新人。,SR,1,10000,1,0,1,badge,44,67,65,fa/solid_medal.svg,https://linux.do/badges/44/-
+li_badge_118,一元复始,一元复始,一生二，二生三，三生万物。,SR,1,10000,1,1,1,badge,118,45721,10,custom/118.png,https://linux.do/badges/118/-
+li_badge_135,创新者,Innovator,主题获得 15 票。,SR,1,10000,1,0,1,badge,135,105,61,fa/solid_chevron-up.svg,https://linux.do/badges/135/-
+li_badge_134,头脑风暴者,Brainstormer,主题获得 5 票。,SR,1,10000,1,0,1,badge,134,150,58,fa/solid_chevron-up.svg,https://linux.do/badges/134/-
+li_badge_133,白日梦想家,Daydreamer,主题获得 1 票。,SR,1,10000,1,0,1,badge,133,303,52,fa/solid_chevron-up.svg,https://linux.do/badges/133/-
+li_badge_121,提交者,Committer,为社区开源项目贡献 1 次提交。,R,1,10000,1,0,1,badge,121,5,85,fa/solid_certificate.svg,https://linux.do/badges/121/-
+li_badge_127,贡献者,Contributor,向社区开源项目提交 1 个被接受的 PR。,R,1,10000,1,0,1,badge,127,20,75,fa/brands_git-alt.svg,https://linux.do/badges/127/-
+li_badge_116,圆圆满满,圆圆满满,月圆、人团圆、人生圆圆满满。,R,1,10000,1,1,1,badge,116,1256,40,custom/116.png,https://linux.do/badges/116/-
+li_badge_119,蛇来运转,蛇来运转,蛇来运转，福至财兴。,R,1,10000,1,1,1,badge,119,1573,38,custom/119.png,https://linux.do/badges/119/-
+li_badge_117,大预言家,大预言家,没有人比我更懂！,R,1,10000,1,1,1,badge,117,1834,37,custom/117.png,https://linux.do/badges/117/-
+li_badge_102,种子用户,种子用户,论坛创立前 1 个月内加入的种子用户。,R,1,10000,1,1,1,badge,102,4379,30,fa/solid_seedling.svg,https://linux.do/badges/102/-
+li_badge_115,文化宣导员,文化宣导员,社区文化宣导员。,R,1,10000,1,1,1,badge,115,6466,27,fa/solid_bullhorn.svg,https://linux.do/badges/115/-
+li_badge_131,不二之选,不二之选,我们都是各自的不二之选。,R,1,10000,1,1,1,badge,131,84936,5,custom/131.png,https://linux.do/badges/131/-
+li_badge_103,龙行龘龘,龙行龘龘,龙行龘龘，前程朤朤。,R,1,10000,1,1,1,badge,103,326,52,custom/103.png,https://linux.do/badges/103/-
+li_badge_107,幸运佬,幸运佬,论坛活动中中奖的幸运佬友。,R,1,10000,1,1,1,badge,107,7,83,fa/solid_baby.svg,https://linux.do/badges/107/-
+li_badge_132,骐骥驰骋,骐骥驰骋,骐骥驰骋，势不可挡。,R,1,10000,1,1,1,badge,132,2251,35,custom/132.png,https://linux.do/badges/132/-
+li_badge_27,冠军,Champion,邀请 5 位成员。,R,1,10000,1,0,1,badge,27,1746,38,fa/solid_user-plus.svg,https://linux.do/badges/27/-
+li_badge_26,推动者,Campaigner,邀请 3 位基础用户。,R,1,10000,1,0,1,badge,26,3758,31,fa/solid_user-plus.svg,https://linux.do/badges/26/-
+li_badge_25,引路人,Promoter,首次邀请用户。,R,1,10000,1,0,1,badge,25,10464,23,fa/solid_user-plus.svg,https://linux.do/badges/25/-
+li_badge_32,回馈者,Gives Back,100 篇帖子被赞，且给出 100 个赞。,R,1,10000,1,0,1,badge,32,10710,22,fa/solid_heart.svg,https://linux.do/badges/32/-
+li_badge_38,致谢者,Thank You,20 篇帖子被赞，且给出 10 个赞。,R,1,10000,1,0,1,badge,38,37886,12,fa/solid_heart.svg,https://linux.do/badges/38/-
+li_badge_35,炽爱者,Crazy in Love,单日用完 50 个赞，累计 20 次。,R,1,10000,1,0,1,badge,35,925,43,fa/solid_heart.svg,https://linux.do/badges/35/-
+li_badge_8,卓越回复,Great Reply,单条回复获得 50 个赞。,R,1,10000,1,0,1,badge,8,6128,27,fa/solid_reply.svg,https://linux.do/badges/8/-
+li_badge_7,优质回复,Good Reply,单条回复获得 25 个赞。,R,1,10000,1,0,1,badge,7,30899,13,fa/solid_reply.svg,https://linux.do/badges/7/-
+li_badge_6,精彩回复,Nice Reply,单条回复获得 10 个赞。,R,1,10000,1,0,1,badge,6,114140,3,fa/solid_reply.svg,https://linux.do/badges/6/-
+li_badge_19,优质主题,Good Topic,单个主题获得 25 个赞。,R,1,10000,1,0,1,badge,19,39538,11,fa/solid_file-signature.svg,https://linux.do/badges/19/-
+li_badge_18,精彩主题,Nice Topic,单个主题获得 10 个赞。,R,1,10000,1,0,1,badge,18,110365,3,fa/solid_file-signature.svg,https://linux.do/badges/18/-
+li_badge_23,传播大师,Great Share,分享的帖子获得 1000 位独立访客。,R,1,10000,1,0,1,badge,23,8,82,fa/solid_share-nodes.svg,https://linux.do/badges/23/-
+li_badge_22,广传者,Good Share,分享的帖子获得 300 位独立访客。,R,1,10000,1,0,1,badge,22,60,66,fa/solid_share-nodes.svg,https://linux.do/badges/22/-
+li_badge_21,分享达人,Nice Share,分享的帖子获得 25 位独立访客。,R,1,10000,1,0,1,badge,21,1152,41,fa/solid_share-nodes.svg,https://linux.do/badges/21/-
+li_badge_30,知名链接,Famous Link,发布的外链获得 1000 次点击。,R,1,10000,1,0,1,badge,30,1794,37,fa/solid_link.svg,https://linux.do/badges/30/-
+li_badge_29,热门链接,Hot Link,发布的外链获得 300 次点击。,R,1,10000,1,0,1,badge,29,9164,24,fa/solid_link.svg,https://linux.do/badges/29/-
+li_badge_28,人气链接,Popular Link,发布的外链获得 50 次点击。,R,1,10000,1,0,1,badge,28,72150,6,fa/solid_link.svg,https://linux.do/badges/28/-
+li_badge_10,编辑者,Editor,首次编辑帖子。,R,1,10000,1,0,1,badge,10,56139,8,fa/solid_pen.svg,https://linux.do/badges/10/-
+li_badge_48,Wiki 编辑者,Wiki Editor,首次编辑 Wiki。,R,1,10000,1,0,1,badge,48,7074,26,fa/regular_pen-to-square.svg,https://linux.do/badges/48/-
+custom_n_001,晨光,,普通的一天，也值得被记住。,N,1,10000,1,0,1,generated,,,,,
+custom_n_002,微尘,,路过人间的小小印记。,N,1,10000,1,0,1,generated,,,,,
+custom_n_003,青竹,,在角落里发光的日常。,N,1,10000,1,0,1,generated,,,,,
+custom_n_004,远山,,不起眼，但确实存在。,N,1,10000,1,0,1,generated,,,,,
+custom_n_005,听风,,今天也有好好生活。,N,1,10000,1,0,1,generated,,,,,
+custom_n_006,拾贝,,随手捡起的一点微光。,N,1,10000,1,0,1,generated,,,,,
+custom_n_007,云舟,,平凡日子里的普通称号。,N,1,10000,1,0,1,generated,,,,,
+custom_n_008,月影,,没有故事，也是一种故事。,N,1,10000,1,0,1,generated,,,,,
+custom_n_009,星野,,风来过，留下了这个名字。,N,1,10000,1,0,1,generated,,,,,
+custom_n_010,松间,,随机生成，随缘拥有。,N,1,10000,1,0,1,generated,,,,,
+custom_n_011,溪客,,普通的一天，也值得被记住。,N,1,10000,1,0,1,generated,,,,,
+custom_n_012,海边,,路过人间的小小印记。,N,1,10000,1,0,1,generated,,,,,
+custom_n_013,初雪,,在角落里发光的日常。,N,1,10000,1,0,1,generated,,,,,
+custom_n_014,归鸟,,不起眼，但确实存在。,N,1,10000,1,0,1,generated,,,,,
+custom_n_015,半盏,,今天也有好好生活。,N,1,10000,1,0,1,generated,,,,,
+custom_n_016,小满,,随手捡起的一点微光。,N,1,10000,1,0,1,generated,,,,,
+custom_n_017,长街,,平凡日子里的普通称号。,N,1,10000,1,0,1,generated,,,,,
+custom_n_018,灯火,,没有故事，也是一种故事。,N,1,10000,1,0,1,generated,,,,,
+custom_n_019,石桥,,风来过，留下了这个名字。,N,1,10000,1,0,1,generated,,,,,
+custom_n_020,田野,,随机生成，随缘拥有。,N,1,10000,1,0,1,generated,,,,,
+custom_n_021,竹影,,普通的一天，也值得被记住。,N,1,10000,1,0,1,generated,,,,,
+custom_n_022,松风,,路过人间的小小印记。,N,1,10000,1,0,1,generated,,,,,
+custom_n_023,云岫,,在角落里发光的日常。,N,1,10000,1,0,1,generated,,,,,
+custom_n_024,星尘,,不起眼，但确实存在。,N,1,10000,1,0,1,generated,,,,,
+custom_n_025,月白,,今天也有好好生活。,N,1,10000,1,0,1,generated,,,,,
+custom_n_026,青岚,,随手捡起的一点微光。,N,1,10000,1,0,1,generated,,,,,
+custom_n_027,远舟,,平凡日子里的普通称号。,N,1,10000,1,0,1,generated,,,,,
+custom_n_028,听雨,,没有故事，也是一种故事。,N,1,10000,1,0,1,generated,,,,,
+custom_n_029,拾光,,风来过，留下了这个名字。,N,1,10000,1,0,1,generated,,,,,
+custom_n_030,半夏,,随机生成，随缘拥有。,N,1,10000,1,0,1,generated,,,,,
+custom_n_031,南风,,普通的一天，也值得被记住。,N,1,10000,1,0,1,generated,,,,,
+custom_n_032,北辰,,路过人间的小小印记。,N,1,10000,1,0,1,generated,,,,,
+custom_n_033,东篱,,在角落里发光的日常。,N,1,10000,1,0,1,generated,,,,,
+custom_n_034,西窗,,不起眼，但确实存在。,N,1,10000,1,0,1,generated,,,,,
+custom_n_035,白露,,今天也有好好生活。,N,1,10000,1,0,1,generated,,,,,
+custom_n_036,清和,,随手捡起的一点微光。,N,1,10000,1,0,1,generated,,,,,
+custom_n_037,知夏,,平凡日子里的普通称号。,N,1,10000,1,0,1,generated,,,,,
+custom_n_038,望秋,,没有故事，也是一种故事。,N,1,10000,1,0,1,generated,,,,,
+custom_n_039,临冬,,风来过，留下了这个名字。,N,1,10000,1,0,1,generated,,,,,
+custom_n_040,见山,,随机生成，随缘拥有。,N,1,10000,1,0,1,generated,,,,,
+custom_n_041,观海,,普通的一天，也值得被记住。,N,1,10000,1,0,1,generated,,,,,
+custom_n_042,问竹,,路过人间的小小印记。,N,1,10000,1,0,1,generated,,,,,
+custom_n_043,寻梅,,在角落里发光的日常。,N,1,10000,1,0,1,generated,,,,,
+custom_n_044,折柳,,不起眼，但确实存在。,N,1,10000,1,0,1,generated,,,,,
+custom_n_045,煮雪,,今天也有好好生活。,N,1,10000,1,0,1,generated,,,,,
+custom_n_046,煎茶,,随手捡起的一点微光。,N,1,10000,1,0,1,generated,,,,,
+custom_n_047,温酒,,平凡日子里的普通称号。,N,1,10000,1,0,1,generated,,,,,
+custom_n_048,旧巷,,没有故事，也是一种故事。,N,1,10000,1,0,1,generated,,,,,
+custom_n_049,新芽,,风来过，留下了这个名字。,N,1,10000,1,0,1,generated,,,,,
+custom_n_050,归途,,随机生成，随缘拥有。,N,1,10000,1,0,1,generated,,,,,

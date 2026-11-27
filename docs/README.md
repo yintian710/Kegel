@@ -14,6 +14,9 @@ Kegel 是一个基于 **LINUX DO Connect** 身份认证的每日提肛自律打�
 | [2. 核心业务流程详解 (features.md)](./features.md) | 三组练习计时、积分额度风控、商品兑换自动发货、赞助榜 | 产品、运营、维护者 |
 | [3. API 接口规范大全 (api_reference.md)](./api_reference.md) | 全站 RESTful JSON 接口、请求/响应结构体、错误码 | 前端与后端集成人员 |
 | [4. 生产部署与运维指南 (deployment.md)](./deployment.md) | 环境变量配置、Nginx/Caddy 反向代理、安全加固与备份 | 运维人员、站长 |
+| [5. 称号抽卡与熔炼方案 (title_gacha.md)](./title_gacha.md) | 卡池、抽卡、签到券、消耗式合成、UR 与 LDC 95 折（设计稿） | 产品、开发者 |
+| [6. 称号池（4/7/20/30/50 金字塔）(title_pool.md)](./title_pool.md) | 4 个 UR、7 条 SSR 路线、20 个路线 SR、交叉消耗配方与完整卡池 | 产品、运营、开发者 |
+| [7. 称号稀缺值与金字塔分级 (title_scarcity.md)](./title_scarcity.md) | 名字与意义优先的分级规则、概率、SSR 消耗合成 UR 与校准 | 产品、运营 |
 
 ---
 

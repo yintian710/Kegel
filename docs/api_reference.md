@@ -311,6 +311,10 @@
 | `/api/admin/review` | POST | `{ "user_id": "123", "approved": true }` | 批准异常访问标记，恢复正常打卡资格 |
 | `/api/admin/products` | POST | `{ "id"?: "1", "category": "LDC", "name": "...", "points_price": 500, "ldc_amount": "1.00", "user_daily_limit": 1, "total_daily_limit": 10, "is_active": true, "secondary_secret": "..." }` | 验证二级密码后新增或编辑商品 |
 | `/api/admin/products/<id>/archive` | POST | `{ "secondary_secret": "..." }` | 验证二级密码后立即下架指定商品 |
+| `/api/admin/products`（限时折扣字段） | POST | `promo_enabled: bool`；开启时必填 `promo_discount_bp`(1000–9900，8000=8 折) 与 `promo_ends_at`(epoch 秒，须晚于当前)；关闭则清空。`category:"TICKET"` 时需 `draw_count`(1/10/100)。商品返回增加 `promo_active`、`price_now`（`GET /api/shop` 按当前用户算好：限时折扣再叠加称号折扣） | 限时折扣与称号折扣叠加；其节省不占称号折扣每日上限，订单记 `points_promo_saved` |
+| `/api/admin/purchases/check` | POST | `{}` | 向 Credit 逐笔核对所有 `uncertain` 订单（最多 200 笔），返回 `{ "checked": { "success": n, "failed": n, "waiting": n, "unknown": n } }`；与每 5 分钟的定时任务同一逻辑，无需二级密码 |
+| `/api/admin/purchases/<order_no>/check` | POST | `{}` | 核对单笔订单，返回 `{ "order", "outcome": "success\|failed\|waiting\|unknown\|settled", "message" }`。`success`=Credit 确认已发货；`failed`=下单满 30 秒仍查无此单，已退分；`waiting`=不满 30 秒；`unknown`=状态未知/查询出错，保持待核对 |
+| `/api/shop/orders/<order_no>/check` | POST | `{}` | 用户核对自己的待核对订单（须登录；非本人订单 404；同一订单 10 秒内重复查询 429），返回同上并附 `wallet` |
 | `/api/admin/purchases/<order_no>/reconcile` | POST | `{ "result": "success" \| "failed", "trade_no"?: "...", "secondary_secret": "..." }` | 人工核对 `uncertain`（待核对）订单：`success` 标为发货成功（扣分保留，可附交易单号）；`failed` 标为失败并退还积分，释放当日额度。仅待核对订单可处理，否则返回 `409`；退款按订单幂等，不会重复退还 |
 | `/api/admin/users?q=<用户名或用户ID>` | GET | 无 | 搜索已有站内记录的数字 ID 用户，用户名不区分 ASCII 大小写、支持部分匹配与 `@` 前缀，ID 精确匹配；最多返回 50 位用户及余额 |
 | `/api/admin/points/add` | POST | `{ "user_id": "123", "amount": 250, "secondary_secret": "输入的二级密码", "request_id": "客户端生成的UUID" }` | 验证管理员身份与二级密码后增加站内积分，返回 `user`、`wallet`、`entry` |

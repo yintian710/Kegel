@@ -1,8 +1,11 @@
 import { defineStore } from 'pinia'
-import { loginUrl, status, type StatusData, type User } from '../api'
+import { ref } from 'vue'
+import { loginUrl, status, type StatusData, type User, type Wallet } from '../api'
 
 export const useIdentityStore = defineStore('identity', () => {
   const user = ref<User | null>(null)
+  const wallet = ref<Wallet | null>(null)
+  const streakDays = ref<number>(0)
   const oauthReady = ref(false)
   const loaded = ref(false)
   const loading = ref(false)
@@ -15,6 +18,8 @@ export const useIdentityStore = defineStore('identity', () => {
     try {
       const data = await pending
       user.value = data.user
+      wallet.value = data.wallet
+      streakDays.value = data.entry?.streak_days ?? data.streak_days ?? 0
       oauthReady.value = data.oauth_ready
       loaded.value = true
       return data
@@ -24,7 +29,23 @@ export const useIdentityStore = defineStore('identity', () => {
     }
   }
 
-  async function requireLogin(next: '/' | '/practice' | '/shop' | '/titles' | '/donate' | '/admin' | string): Promise<boolean> {
+  function setWallet(newWallet: Wallet | null) {
+    wallet.value = newWallet
+  }
+
+  function setBalance(balance: number) {
+    if (wallet.value) {
+      wallet.value.balance = balance
+    } else {
+      wallet.value = { balance }
+    }
+  }
+
+  function setStreak(streak: number) {
+    streakDays.value = streak
+  }
+
+  async function requireLogin(next: '/' | '/practice' | '/shop' | '/titles' | '/donate' | '/admin' | '/leaderboard' | '/profile' | string): Promise<boolean> {
     if (!loaded.value) await refresh()
     if (oauthReady.value && !user.value) {
       window.location.assign(loginUrl(next))
@@ -33,5 +54,5 @@ export const useIdentityStore = defineStore('identity', () => {
     return true
   }
 
-  return { user, oauthReady, loaded, loading, refresh, requireLogin }
+  return { user, wallet, streakDays, oauthReady, loaded, loading, refresh, setWallet, setBalance, setStreak, requireLogin }
 })

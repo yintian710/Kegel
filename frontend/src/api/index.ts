@@ -20,6 +20,7 @@ export interface CheckinEntry {
   claimed_at: string | null
   reward_status: 'unclaimed' | 'credited' | 'none'
   flow_id: string | null
+  skipped?: boolean
   streak_days?: number
   reward_bonus_percent?: number
 }
@@ -38,7 +39,11 @@ export interface Session {
 }
 
 export interface Review { reason: string; approved: boolean | number }
-export interface CheckinLeaderboardItem { rank: number; username: string; amount: number; reward_status: CheckinEntry['reward_status'] }
+// rank 为不含「不发货名单」用户的名次；名单用户 skipped=true、rank=null（不占名次、奖励不变）；position 为完成先后序号
+export interface CheckinLeaderboardItem { rank: number | null; position: number; skipped: boolean; username: string; amount: number; reward_status: CheckinEntry['reward_status']; completed_at: string }
+// 连续打卡榜：streak_days 为当前连续工作日数；done_today=今日已打卡（否则是上个工作日已打、连续仍有效）
+export interface StreakBoardItem { rank: number | null; position: number; skipped: boolean; username: string; streak_days: number; done_today: boolean }
+export interface StreakBoardData { day: string; items: StreakBoardItem[] }
 
 export interface StatusData {
   user: User | null
@@ -58,6 +63,7 @@ export interface StatusData {
   session: Session | null
   review: Review | null
   leaderboard: CheckinLeaderboardItem[]
+  streak_days?: number
 }
 
 export interface SessionStartInput {
@@ -115,6 +121,12 @@ export interface Product {
   draw_count?: number
   discount_eligible?: number
   special_discount_bp?: number | null
+  // 限时折扣：promo_bp 为折扣力度（8000=8 折），promo_ends_at 为结束时间（epoch 秒），与称号折扣叠加
+  promo_enabled?: number
+  promo_bp?: number | null
+  promo_ends_at?: number | null
+  promo_active?: boolean
+  price_now?: number
 }
 export interface Purchase {
   order_no: string
@@ -146,6 +158,9 @@ export interface ShopData {
 export interface ShopDiscount { bp: number; label: string; saved_today: number; cap: number; remaining: number }
 export interface PurchaseInput { product_id: string; request_id: string }
 export interface PurchaseData { order: Purchase; status: Purchase['status']; trade_no: string; error: string }
+export type CheckOutcome = 'success' | 'failed' | 'waiting' | 'unknown' | 'settled'
+export interface OrderCheckData { order: Purchase; outcome: CheckOutcome; message: string; wallet?: Wallet }
+export interface CheckAllData { checked: Partial<Record<CheckOutcome | 'error', number>>; reasons: string[] }
 
 export type Rarity = 'N' | 'R' | 'SR' | 'SSR' | 'UR'
 export type TicketType = 'single' | 'ten' | 'hundred'
@@ -166,7 +181,7 @@ export interface TitleItem {
   copies: number
   owned: boolean
 }
-export interface TicketProduct { id: string; name: string; description: string; points_price: number; draw_count: number }
+export interface TicketProduct { id: string; name: string; description: string; points_price: number; draw_count: number; price_now?: number; promo_active?: boolean }
 export interface DrawHistoryItem { id: string; title_id: string; rarity: Rarity; is_new: boolean; created_at: string }
 export interface TitleData {
   user: User | null
@@ -181,7 +196,21 @@ export interface TitleData {
   history: { draws: DrawHistoryItem[]; crafts: Array<Record<string, unknown>> }
 }
 export interface DrawInput { ticket_type: TicketType; request_id: string }
-export interface DrawData { batch: { id: string; ticket_type: TicketType; count: number }; results: Array<{ title_id: string; rarity: Rarity; is_new: boolean }>; pity: number; pity_limit: number; tickets: TicketBalances }
+export interface DrawResultItem {
+  title_id: string
+  rarity: Rarity
+  is_new: boolean
+  name?: string
+  description?: string
+  icon?: string
+}
+export interface DrawData {
+  batch: { id: string; ticket_type: TicketType; count: number }
+  results: DrawResultItem[]
+  pity: number
+  pity_limit: number
+  tickets: TicketBalances
+}
 export interface TicketPurchaseData { order: { order_no: string; product_name: string; points_cost: number; draw_count: number }; status: string; ticket_type: TicketType | null; tickets: TicketBalances; wallet: Wallet }
 export interface SmeltData { kind: string; output: { title_id: string; rarity: Rarity; is_new: boolean }; consumed: Array<{ title_id: string; count: number }>; collection: { copies: number } }
 
@@ -227,7 +256,7 @@ export interface AddPointsInput { user_id: string; amount: number | string; requ
 export interface AddPointsData { user: Pick<User, 'id' | 'username'>; wallet: Wallet; entry: AdminCreditEntry }
 export interface SaveProductInput {
   id?: string
-  category: 'LDC'
+  category: 'LDC' | 'TICKET'
   name: string
   description: string
   points_price: number
@@ -235,6 +264,10 @@ export interface SaveProductInput {
   user_daily_limit: number
   total_daily_limit: number
   is_active: boolean
+  draw_count?: number
+  promo_enabled?: boolean
+  promo_discount_bp?: number
+  promo_ends_at?: number
   secondary_secret?: string
   secondary_password?: string
 }
@@ -257,6 +290,9 @@ export const session = {
   step: (token: string, config?: RequestConfig) => post<SessionData>('/session/step', { token }, config),
   complete: (token: string, config?: RequestConfig) => post<SessionCompleteData>('/session/complete', { token }, config),
 }
+export const leaderboard = {
+  streak: (config?: RequestConfig) => get<StreakBoardData>('/leaderboard/streak', config),
+}
 export const claim = (config?: RequestConfig) => post<ClaimData>('/claim', {}, config)
 export const practice = {
   get: (config?: RequestConfig) => get<PracticeData>('/practice', config),
@@ -265,6 +301,7 @@ export const practice = {
 export const shop = {
   get: (config?: RequestConfig) => get<ShopData>('/shop', config),
   purchase: (input: PurchaseInput, config?: RequestConfig) => post<PurchaseData>('/shop/purchase', input, config),
+  checkOrder: (orderNo: string, config?: RequestConfig) => post<OrderCheckData>(`/shop/orders/${encodeURIComponent(orderNo)}/check`, {}, config),
 }
 export const titles = {
   get: (config?: RequestConfig) => get<TitleData>('/titles', config),
@@ -287,6 +324,8 @@ export const admin = {
   addPoints: (input: AddPointsInput, config?: RequestConfig) => post<AddPointsData>('/admin/points/add', input, config),
   saveProduct: (input: SaveProductInput, config?: RequestConfig) => post<SaveProductData>('/admin/products', input, config),
   archiveProduct: (id: string, config?: RequestConfig) => post<EmptyData>(`/admin/products/${encodeURIComponent(id)}/archive`, {}, config),
+  checkPurchase: (orderNo: string, config?: RequestConfig) => post<OrderCheckData>(`/admin/purchases/${encodeURIComponent(orderNo)}/check`, {}, config),
+  checkAllPurchases: (config?: RequestConfig) => post<CheckAllData>('/admin/purchases/check', {}, config),
   reconcilePurchase: (orderNo: string, input: ReconcileInput, config?: RequestConfig) => post<ReconcileData>(`/admin/purchases/${encodeURIComponent(orderNo)}/reconcile`, input, config),
 }
 

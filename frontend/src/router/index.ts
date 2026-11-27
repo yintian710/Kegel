@@ -37,6 +37,22 @@ const router = createRouter({
       },
     },
     {
+      path: '/leaderboard',
+      component: () => import('../pages/LeaderboardPage.vue'),
+      meta: {
+        title: '排行榜 · 提肛打卡',
+        description: '坚持榜、总积分榜与每日排名，见证你的健康成长。',
+      },
+    },
+    {
+      path: '/profile',
+      component: () => import('../pages/ProfilePage.vue'),
+      meta: {
+        title: '个人中心 · 提肛打卡',
+        description: '查看个人打卡资产、概览日历与完成记录。',
+      },
+    },
+    {
       path: '/donate',
       component: () => import('../pages/DonatePage.vue'),
       meta: {

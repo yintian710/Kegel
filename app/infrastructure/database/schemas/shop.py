@@ -19,6 +19,9 @@ class ShopProduct(Model):
     draw_count = fields.IntField(default=0)
     discount_eligible = fields.IntField(default=1)
     special_discount_bp = fields.IntField(null=True)
+    promo_enabled = fields.IntField(default=0)
+    promo_bp = fields.IntField(null=True)
+    promo_ends_at = fields.FloatField(null=True)
 
     class Meta:
         table = "shop_products"
@@ -43,6 +46,7 @@ class ShopPurchase(Model):
     day = fields.TextField()
     request_id = fields.TextField(null=True)
     draw_count = fields.IntField(default=0)
+    points_promo_saved = fields.BigIntField(default=0)
 
     class Meta:
         table = "shop_purchases"

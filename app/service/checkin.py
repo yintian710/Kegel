@@ -156,6 +156,49 @@ async def _workday_streak(user_id: str, day: str) -> int:
     return streak
 
 
+def _streak_ending(workdays: set[date], last: date) -> int:
+    """以 last（已完成的工作日）为末日向前数连续工作日；周末不增天也不中断（同 _workday_streak）。"""
+    streak, expected = 1, _previous_workday(last)
+    while expected in workdays:
+        streak += 1
+        expected = _previous_workday(expected)
+    return streak
+
+
+async def streak_leaderboard(today: str, limit: int = 50) -> dict:
+    """连续打卡榜：按当前连续工作日数排名。今日已完成，或上一个工作日已完成（连续仍有效）的用户才上榜。
+    不发货名单用户置灰、不占名次（与每日榜一致）。"""
+    current = date.fromisoformat(today)
+    previous = _previous_workday(current)
+    days_by_user: dict[str, set[date]] = {}
+    names: dict[str, str] = {}
+    for row in await fetch("SELECT user_id,username,day FROM entries WHERE day>=$1 ORDER BY day",
+                           (current - timedelta(days=400)).isoformat()):
+        days_by_user.setdefault(row["user_id"], set()).add(date.fromisoformat(row["day"]))
+        names[row["user_id"]] = row["username"]
+    skipped = await catalog.no_payout_ids()
+    rows = []
+    for user_id, days in days_by_user.items():
+        workdays = {d for d in days if d.weekday() < 5}
+        done_today = current in workdays
+        if done_today:
+            streak = _streak_ending(workdays, current)
+        elif previous in workdays:
+            streak = _streak_ending(workdays, previous)
+        else:
+            continue
+        rows.append({"user_id": user_id, "username": names[user_id], "streak_days": streak, "done_today": done_today})
+    rows.sort(key=lambda r: (-r["streak_days"], not r["done_today"], r["username"].lower()))
+    items, counted = [], 0
+    for position, row in enumerate(rows[:limit], start=1):
+        is_skipped = row["user_id"] in skipped
+        if not is_skipped:
+            counted += 1
+        items.append({"rank": None if is_skipped else counted, "position": position, "skipped": is_skipped,
+                      "username": row["username"], "streak_days": row["streak_days"], "done_today": row["done_today"]})
+    return {"day": today, "items": items}
+
+
 def _streak_bonus_percent(streak_days: int) -> int:
     return min(max(streak_days - 1, 0), 100)
 
@@ -179,6 +222,28 @@ async def _entry(day: str, user_id: str) -> dict | None:
     return await fetch_one("SELECT * FROM entries WHERE day=$1 AND user_id=$2", day, user_id)
 
 
+async def _effective_ranks(day: str) -> dict[str, int | None]:
+    """当日名次（不发货名单用户不占名次，None）。entries.rank 仍是按完成先后的唯一序号。"""
+    skipped = await catalog.no_payout_ids()
+    ranks: dict[str, int | None] = {}
+    counted = 0
+    for row in await fetch("SELECT user_id FROM entries WHERE day=$1 ORDER BY rank", day):
+        if row["user_id"] in skipped:
+            ranks[row["user_id"]] = None
+        else:
+            counted += 1
+            ranks[row["user_id"]] = counted
+    return ranks
+
+
+def _ranked(view: dict | None, ranks: dict[str, int | None]) -> dict | None:
+    """名单用户保留原序号并标记 skipped；其余用户 rank 替换为不含名单用户的名次。"""
+    if view is None:
+        return None
+    effective = ranks.get(view["user_id"])
+    return {**view, "rank": view["rank"] if effective is None else effective, "skipped": effective is None}
+
+
 async def status_view(user: dict | None, now: float, subject: str = "") -> dict:
     day = await ensure_day(now)
     config = await get_settings()
@@ -190,7 +255,13 @@ async def status_view(user: dict | None, now: float, subject: str = "") -> dict:
     pending = await review.has_pending_review(day["day"], identity)
     if session and not session["eligible"] and user and day["opened_at"] is not None and not pending:
         session = None
-    streak_days = await _workday_streak(identity, day["day"]) if entry else None
+    streak_days = await _workday_streak(identity, day["day"]) if user else 0
+    ranks = await _effective_ranks(day["day"])
+    board = [{"rank": ranks.get(row["user_id"]), "position": row["rank"], "skipped": ranks.get(row["user_id"]) is None,
+              "username": row["username"], "amount": row["amount"], "reward_status": row["reward_status"],
+              "completed_at": timeutil.iso_time(row["completed_at"])}
+             for row in await fetch("SELECT rank,user_id,username,amount,reward_status,completed_at FROM entries "
+                                    "WHERE day=$1 ORDER BY rank LIMIT 50", day["day"])]
     return {"user": user, "day": day["day"], "is_open": day["opened_at"] is not None,
             "opened_at": timeutil.iso_time(day["opened_at"]), "open_reason": day["open_reason"],
             "deadline": config["deadline"], "timezone": Settings.SITE_TZ_NAME,
@@ -198,9 +269,9 @@ async def status_view(user: dict | None, now: float, subject: str = "") -> dict:
             "wallet": await credits.wallet_view(identity) if user else None,
             "quota": await catalog.quota_view(day["day"]), "oauth_ready": Settings.oauth_ready(),
             "total": (await fetch_one("SELECT COUNT(*) AS n FROM entries WHERE day=$1", day["day"]))["n"],
-            "entry": entry_view(entry, streak_days), "session": practice.view(session, now), "review": pending,
-            "leaderboard": await fetch("SELECT rank,username,amount,reward_status FROM entries "
-                                       "WHERE day=$1 ORDER BY rank LIMIT 50", day["day"])}
+            "entry": _ranked(entry_view(entry, streak_days if entry else None), ranks),
+            "session": practice.view(session, now), "review": pending,
+            "streak_days": streak_days, "leaderboard": board}
 
 
 async def practice_api_view(user: dict | None, today: str) -> dict:
@@ -284,8 +355,13 @@ async def complete_session(user: dict | None, visitor: str, body: dict) -> dict:
             pending = await review.has_pending_review(today, user["id"])
             if row["eligible"] and not pending:
                 rank = (await fetch_one("SELECT COUNT(*)+1 AS n FROM entries WHERE day=$1", today))["n"]
+                # 不发货名单用户不占名次：其他人按「不含名单用户」的名次领奖；名单用户自己的积分奖励按原序号计算、保持不变。
+                skipped = await catalog.no_payout_ids()
+                reward_rank = rank if user["id"] in skipped else (await fetch_one(
+                    "SELECT COUNT(*)+1 AS n FROM entries WHERE day=$1 AND user_id <> ALL($2::text[])",
+                    today, list(skipped)))["n"]
                 base_amount = next((tier["amount"] for tier in (await get_settings())["reward_tiers"]
-                                    if rank <= tier["through"]), 0)
+                                    if reward_rank <= tier["through"]), 0)
                 streak_days = await _workday_streak(user["id"], today)
                 amount = _apply_streak_bonus(base_amount, _streak_bonus_percent(streak_days))
                 await execute("""INSERT INTO entries(day,user_id,username,rank,amount,completed_at,reward_status,flow_id)
@@ -295,11 +371,12 @@ async def complete_session(user: dict | None, visitor: str, body: dict) -> dict:
                               today, user["id"], user["username"], rank, amount, row["updated_at"],
                               "unclaimed" if amount > 0 else "none", row["flow_id"])
             entry = await _entry(today, user["id"])
+            ranks = await _effective_ranks(today)
             if entry and not pending:
-                await titles.grant_checkin_tickets(user["id"], int(entry["rank"]), today, now)
+                await titles.grant_checkin_tickets(user["id"], ranks.get(user["id"]) or int(entry["rank"]), today, now)
             if entry and streak_days is None:
                 streak_days = await _workday_streak(user["id"], today)
-        return {"session": practice.view(row, now), "entry": entry_view(entry, streak_days)}
+        return {"session": practice.view(row, now), "entry": _ranked(entry_view(entry, streak_days), ranks) if entry else None}
 
 
 async def claim(user: dict) -> dict:

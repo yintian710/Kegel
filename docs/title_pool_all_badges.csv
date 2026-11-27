@@ -1,0 +1,84 @@
+code,name,description,badge_group,is_limited,grant_count,scarcity,icon,source_url
+li_badge_1,Basic,获得社区全部基础功能。,Trust Level,0,154995,1,fa/solid_user.svg,https://linux.do/badges/1/-
+li_badge_2,Member,解锁邀请、群组私信和更多点赞额度。,Trust Level,0,102511,3,fa/solid_user.svg,https://linux.do/badges/2/-
+li_badge_3,Regular,解锁改分类、重命名、关注链接、Wiki 编辑和更多点赞额度。,Trust Level,0,11654,22,fa/solid_user.svg,https://linux.do/badges/3/-
+li_badge_4,Leader,解锁全局编辑、置顶、关闭、归档、拆分合并和更多点赞额度。,Trust Level,0,12,79,fa/solid_user.svg,https://linux.do/badges/4/-
+li_badge_5,Welcome,收到第一个赞。,Community,0,118683,2,fa/solid_heart.svg,https://linux.do/badges/5/-
+li_badge_6,Nice Reply,单条回复获得 10 个赞。,Posting,0,114140,3,fa/solid_reply.svg,https://linux.do/badges/6/-
+li_badge_7,Good Reply,单条回复获得 25 个赞。,Posting,0,30899,13,fa/solid_reply.svg,https://linux.do/badges/7/-
+li_badge_8,Great Reply,单条回复获得 50 个赞。,Posting,0,6128,27,fa/solid_reply.svg,https://linux.do/badges/8/-
+li_badge_9,Autobiographer,完善个人资料。,Getting Started,0,17847,18,fa/solid_user-pen.svg,https://linux.do/badges/9/-
+li_badge_10,Editor,首次编辑帖子。,Getting Started,0,56139,8,fa/solid_pen.svg,https://linux.do/badges/10/-
+li_badge_11,First Like,首次点赞他人。,Getting Started,0,126404,2,fa/solid_heart.svg,https://linux.do/badges/11/-
+li_badge_12,First Share,首次分享帖子。,Getting Started,0,14500,20,fa/solid_share-nodes.svg,https://linux.do/badges/12/-
+li_badge_13,First Flag,首次举报帖子。,Getting Started,0,14747,20,fa/solid_flag.svg,https://linux.do/badges/13/-
+li_badge_14,First Link,首次在帖子中添加链接。,Getting Started,0,15207,19,fa/solid_link.svg,https://linux.do/badges/14/-
+li_badge_15,First Quote,首次引用他人帖子。,Getting Started,0,44321,10,fa/solid_quote-right.svg,https://linux.do/badges/15/-
+li_badge_16,Read Guidelines,阅读社区准则。,Getting Started,0,67638,7,fa/solid_file-lines.svg,https://linux.do/badges/16/-
+li_badge_17,Reader,读完一个超过 100 条回复的主题。,Getting Started,0,44661,10,fa/solid_book-open-reader.svg,https://linux.do/badges/17/-
+li_badge_18,Nice Topic,单个主题获得 10 个赞。,Posting,0,110365,3,fa/solid_file-signature.svg,https://linux.do/badges/18/-
+li_badge_19,Good Topic,单个主题获得 25 个赞。,Posting,0,39538,11,fa/solid_file-signature.svg,https://linux.do/badges/19/-
+li_badge_20,Great Topic,单个主题获得 50 个赞。,Posting,0,17914,18,fa/solid_file-signature.svg,https://linux.do/badges/20/-
+li_badge_21,Nice Share,分享的帖子获得 25 位独立访客。,Community,0,1152,41,fa/solid_share-nodes.svg,https://linux.do/badges/21/-
+li_badge_22,Good Share,分享的帖子获得 300 位独立访客。,Community,0,60,66,fa/solid_share-nodes.svg,https://linux.do/badges/22/-
+li_badge_23,Great Share,分享的帖子获得 1000 位独立访客。,Community,0,8,82,fa/solid_share-nodes.svg,https://linux.do/badges/23/-
+li_badge_24,Anniversary,成为活跃成员满一年，且至少发过一帖。,Community,0,85782,5,fa/solid_cake-candles.svg,https://linux.do/badges/24/-
+li_badge_25,Promoter,首次邀请用户。,Community,0,10464,23,fa/solid_user-plus.svg,https://linux.do/badges/25/-
+li_badge_26,Campaigner,邀请 3 位基础用户。,Community,0,3758,31,fa/solid_user-plus.svg,https://linux.do/badges/26/-
+li_badge_27,Champion,邀请 5 位成员。,Community,0,1746,38,fa/solid_user-plus.svg,https://linux.do/badges/27/-
+li_badge_28,Popular Link,发布的外链获得 50 次点击。,Posting,0,72150,6,fa/solid_link.svg,https://linux.do/badges/28/-
+li_badge_29,Hot Link,发布的外链获得 300 次点击。,Posting,0,9164,24,fa/solid_link.svg,https://linux.do/badges/29/-
+li_badge_30,Famous Link,发布的外链获得 1000 次点击。,Posting,0,1794,37,fa/solid_link.svg,https://linux.do/badges/30/-
+li_badge_31,Admired,300 篇帖子各获得至少 5 个赞。,Community,0,194,56,fa/solid_heart.svg,https://linux.do/badges/31/-
+li_badge_32,Gives Back,100 篇帖子被赞，且给出 100 个赞。,Community,0,10710,22,fa/solid_heart.svg,https://linux.do/badges/32/-
+li_badge_33,Out of Love,单日用完 50 个赞。,Community,0,12202,21,fa/solid_heart.svg,https://linux.do/badges/33/-
+li_badge_34,Higher Love,单日用完 50 个赞，累计 5 次。,Community,0,3103,33,fa/solid_heart.svg,https://linux.do/badges/34/-
+li_badge_35,Crazy in Love,单日用完 50 个赞，累计 20 次。,Community,0,925,43,fa/solid_heart.svg,https://linux.do/badges/35/-
+li_badge_36,Appreciated,20 篇帖子各获得至少 1 个赞。,Community,0,39098,12,fa/solid_heart.svg,https://linux.do/badges/36/-
+li_badge_37,Respected,100 篇帖子各获得至少 2 个赞。,Community,0,4126,30,fa/solid_heart.svg,https://linux.do/badges/37/-
+li_badge_38,Thank You,20 篇帖子被赞，且给出 10 个赞。,Community,0,37886,12,fa/solid_heart.svg,https://linux.do/badges/38/-
+li_badge_39,Empathetic,500 篇帖子被赞，且给出 1000 个赞。,Community,0,1048,42,fa/solid_heart.svg,https://linux.do/badges/39/-
+li_badge_40,First Mention,首次在帖子中提及他人。,Getting Started,0,10625,22,fa/solid_at.svg,https://linux.do/badges/40/-
+li_badge_41,First Emoji,首次在帖子中使用表情。,Getting Started,0,84276,5,fa/solid_face-smile.svg,https://linux.do/badges/41/-
+li_badge_42,First Onebox,发布的链接被 onebox 解析。,Getting Started,0,28175,14,fa/solid_cube.svg,https://linux.do/badges/42/-
+li_badge_43,First Reply By Email,首次通过邮件回复。,Getting Started,0,5029,29,fa/solid_envelope.svg,https://linux.do/badges/43/-
+li_badge_44,New User of the Month,首月表现突出的新人。,Getting Started,0,67,65,fa/solid_medal.svg,https://linux.do/badges/44/-
+li_badge_45,Enthusiast,连续访问 10 天。,Community,0,87325,5,fa/regular_eye.svg,https://linux.do/badges/45/-
+li_badge_46,Aficionado,连续访问 100 天。,Community,0,14256,20,fa/regular_eye.svg,https://linux.do/badges/46/-
+li_badge_47,Devotee,连续访问 365 天。,Community,0,1081,42,fa/regular_eye.svg,https://linux.do/badges/47/-
+li_badge_48,Wiki Editor,首次编辑 Wiki。,Getting Started,0,7074,26,fa/regular_pen-to-square.svg,https://linux.do/badges/48/-
+li_badge_100,Certified,完成新手教程。,Getting Started,0,23098,16,fa/solid_stamp.svg,https://linux.do/badges/100/-
+li_badge_101,Licensed,完成进阶教程。,Getting Started,0,16120,19,fa/solid_stamp.svg,https://linux.do/badges/101/-
+li_badge_102,种子用户,论坛创立前 1 个月内加入的种子用户。,绝版,1,4379,30,fa/solid_seedling.svg,https://linux.do/badges/102/-
+li_badge_103,龙行龘龘,龙行龘龘，前程朤朤。,绝版,1,326,52,custom/103.png,https://linux.do/badges/103/-
+li_badge_104,金笔杆,论坛征文活动第 1 名专属徽章。,绝版,1,0,100,fa/solid_pencil.svg,https://linux.do/badges/104/-
+li_badge_105,银笔杆,论坛征文活动第 2 名专属徽章。,绝版,1,24,73,fa/solid_pencil.svg,https://linux.do/badges/105/-
+li_badge_106,铜笔杆,论坛征文活动第 3 名专属徽章。,绝版,1,0,100,fa/solid_pencil.svg,https://linux.do/badges/106/-
+li_badge_107,幸运佬,论坛活动中中奖的幸运佬友。,绝版,1,7,83,fa/solid_baby.svg,https://linux.do/badges/107/-
+li_badge_108,First Reaction,首次对帖子作出反应。,Getting Started,0,73185,6,fa/solid_face-smile.svg,https://linux.do/badges/108/-
+li_badge_109,Solved!,回复被标记为解决方案。,Community,0,18602,18,fa/solid_square-check.svg,https://linux.do/badges/109/-
+li_badge_110,Guidance Counsellor,10 条回复被标记为解决方案。,Community,0,824,44,fa/solid_square-check.svg,https://linux.do/badges/110/-
+li_badge_111,Know-it-All,50 条回复被标记为解决方案。,Community,0,100,61,fa/solid_square-check.svg,https://linux.do/badges/111/-
+li_badge_112,Solution Institution,150 条回复被标记为解决方案。,Community,0,32,71,fa/solid_square-check.svg,https://linux.do/badges/112/-
+li_badge_113,海纳百川,论坛百日纪念。,绝版,1,12882,21,fa/solid_water.svg,https://linux.do/badges/113/-
+li_badge_114,浴火重生,打不死我们的，会让我们更强大！,绝版,1,15643,19,custom/114.png,https://linux.do/badges/114/-
+li_badge_115,文化宣导员,社区文化宣导员。,绝版,1,6466,27,fa/solid_bullhorn.svg,https://linux.do/badges/115/-
+li_badge_116,圆圆满满,月圆、人团圆、人生圆圆满满。,绝版,1,1256,40,custom/116.png,https://linux.do/badges/116/-
+li_badge_117,大预言家,没有人比我更懂！,绝版,1,1834,37,custom/117.png,https://linux.do/badges/117/-
+li_badge_118,一元复始,一生二，二生三，三生万物。,绝版,1,45721,10,custom/118.png,https://linux.do/badges/118/-
+li_badge_119,蛇来运转,蛇来运转，福至财兴。,绝版,1,1573,38,custom/119.png,https://linux.do/badges/119/-
+li_badge_120,元气满满,在人生重要时刻身着元气战袍，留下美好回忆。,Other,0,2,91,fa/solid_angles-up.svg,https://linux.do/badges/120/-
+li_badge_121,Committer,为社区开源项目贡献 1 次提交。,社区开源,0,5,85,fa/solid_certificate.svg,https://linux.do/badges/121/-
+li_badge_122,Frequent Committer,为社区开源项目贡献 25 次提交。,社区开源,0,3,88,fa/solid_certificate.svg,https://linux.do/badges/122/-
+li_badge_123,Amazing Committer,为社区开源项目贡献 250 次提交。,社区开源,0,0,100,fa/solid_certificate.svg,https://linux.do/badges/123/-
+li_badge_127,Contributor,向社区开源项目提交 1 个被接受的 PR。,社区开源,0,20,75,fa/brands_git-alt.svg,https://linux.do/badges/127/-
+li_badge_128,Great Contributor,向社区开源项目提交 25 个被接受的 PR。,社区开源,0,6,84,fa/brands_git-alt.svg,https://linux.do/badges/128/-
+li_badge_129,Amazing Contributor,向社区开源项目提交 250 个被接受的 PR。,社区开源,0,0,100,fa/brands_git-alt.svg,https://linux.do/badges/129/-
+li_badge_130,破界者,让我们一起来破界吧！,绝版,1,2,91,fa/solid_hammer.svg,https://linux.do/badges/130/-
+li_badge_131,不二之选,我们都是各自的不二之选。,绝版,1,84936,5,custom/131.png,https://linux.do/badges/131/-
+li_badge_132,骐骥驰骋,骐骥驰骋，势不可挡。,绝版,1,2251,35,custom/132.png,https://linux.do/badges/132/-
+li_badge_133,Daydreamer,主题获得 1 票。,Community,0,303,52,fa/solid_chevron-up.svg,https://linux.do/badges/133/-
+li_badge_134,Brainstormer,主题获得 5 票。,Community,0,150,58,fa/solid_chevron-up.svg,https://linux.do/badges/134/-
+li_badge_135,Innovator,主题获得 15 票。,Community,0,105,61,fa/solid_chevron-up.svg,https://linux.do/badges/135/-
+li_badge_136,Visionary,主题获得 25 票。,Community,0,87,63,fa/solid_chevron-up.svg,https://linux.do/badges/136/-
+li_badge_164,Only Apple can do,只有 Apple 能做到。,Other,0,9558,23,fa/brands_apple.svg,https://linux.do/badges/164/-

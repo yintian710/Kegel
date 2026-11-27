@@ -2,6 +2,10 @@ from __future__ import annotations
 
 import base64
 import secrets
+from decimal import Decimal, InvalidOperation
+from urllib.parse import urlencode
+
+import httpx
 
 from app.common.http_client import json_request
 from app.config import Settings
@@ -48,5 +52,41 @@ async def dispatch_ldc(order_no: str, user: dict, amount: str) -> tuple[str, str
         if error:
             return ("failed", "", error)
         return ("uncertain", "", "分发响应缺少交易单号及明确错误，需核对")
+    except httpx.HTTPStatusError as exc:
+        # 响应已到达但非 2xx：保留 Credit 返回的原因，是否已发货仍交给订单查询判定。
+        payload = getattr(exc, "payload", None) or {}
+        reason = str(payload.get("error_msg") or payload.get("message") or payload.get("msg") or "").strip()
+        return ("uncertain", "", f"Credit 返回 HTTP {exc.response.status_code}：{reason or '无错误说明'}"[:300])
     except Exception as exc:
         return ("uncertain", "", f"请求超时或网络异常: {type(exc).__name__}")
+
+
+async def query_ldc_order(order_no: str, amount: str) -> tuple[str, str, str]:
+    """Ask Credit whether a /lpay/distribute order exists -> (state, trade_no, detail).
+
+    state: "delivered"（Credit 记录为成功，且单号、金额一致）| "missing"（Credit 明确无此订单）| "unknown"（其他一律不下结论）
+    """
+    if not Settings.LDC_LIVE or not Settings.LDC_CLIENT_ID or not Settings.LDC_CLIENT_SECRET:
+        return ("unknown", "", "未启用真实发货，无法向 Credit 查询")
+    url = f"{Settings.LDC_API_BASE}/epay/api.php?" + urlencode({
+        "act": "order", "pid": Settings.LDC_CLIENT_ID, "key": Settings.LDC_CLIENT_SECRET, "out_trade_no": order_no})
+    try:
+        response = await json_request(url, timeout=10)
+    except httpx.HTTPStatusError as exc:
+        payload = getattr(exc, "payload", None) or {}
+        message = str(payload.get("msg") or payload.get("error_msg") or "").strip()
+        if exc.response.status_code == 404 and payload.get("code") == -1 and "不存在" in message:
+            return ("missing", "", message)
+        return ("unknown", "", f"Credit 返回 HTTP {exc.response.status_code}：{message or '无说明'}"[:200])
+    except Exception as exc:
+        return ("unknown", "", f"查询失败: {type(exc).__name__}")
+    trade_no = str(response.get("trade_no") or "").strip()
+    if response.get("code") == 1 and str(response.get("status")) == "1" and trade_no:
+        try:
+            same_amount = Decimal(str(response.get("money"))) == Decimal(amount)
+        except (InvalidOperation, ValueError):
+            same_amount = False
+        if str(response.get("out_trade_no") or "") == order_no and same_amount:
+            return ("delivered", trade_no, "")
+        return ("unknown", "", "Credit 返回的单号或金额与本地订单不一致")
+    return ("unknown", "", f"Credit 状态 {response.get('status')}：{response.get('msg') or '无说明'}"[:200])

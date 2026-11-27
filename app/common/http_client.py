@@ -13,9 +13,20 @@ _BODY_LIMIT = 1_000_000
 _AUDIT_PREFIXES = ("/lpay/", "/epay/")
 
 
+def _json_object(raw: bytes) -> dict | None:
+    try:
+        value = json.loads(raw)
+    except ValueError:
+        return None
+    return value if isinstance(value, dict) else None
+
+
 async def json_request(url: str, *, method: str = "GET", data: dict | None = None,
                        headers: dict | None = None, form: bool = False, timeout: float = 10) -> dict[str, Any]:
-    """Call a remote JSON API. Payment-gateway exchanges are written to the payment log untruncated."""
+    """Call a remote JSON API. Payment-gateway exchanges are written to the payment log untruncated.
+
+    Non-2xx responses raise httpx.HTTPStatusError with the parsed JSON body on `.payload` (None if not JSON).
+    """
     request_headers = dict(headers or {})
     body: bytes | None = None
     if data is not None:
@@ -38,7 +49,11 @@ async def json_request(url: str, *, method: str = "GET", data: dict | None = Non
             payment_log("outbound.response", exchange_id=exchange_id, status=response.status_code,
                         headers={key: response.headers.get_list(key) for key in response.headers.keys()},
                         body=bytes(raw).decode("utf-8", errors="replace"))
-        response.raise_for_status()
+        try:
+            response.raise_for_status()
+        except httpx.HTTPStatusError as status_error:
+            status_error.payload = _json_object(bytes(raw))
+            raise
         result = json.loads(bytes(raw))
         if not isinstance(result, dict):
             raise ValueError("远端响应不是 JSON 对象")

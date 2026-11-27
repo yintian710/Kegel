@@ -10,6 +10,11 @@ from app.views._common import client_ip, current_user, json_body, visitor_of
 router = APIRouter(prefix="/api")
 
 
+@router.get("/leaderboard/streak")
+async def streak_leaderboard():
+    return good(await checkin.streak_leaderboard(timeutil.day_key()))
+
+
 @router.get("/status")
 async def status(request: Request):
     user = current_user(request)

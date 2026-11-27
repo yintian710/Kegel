@@ -13,7 +13,7 @@ from app.common import scheduler
 from app.common.payment_log import payment_log, redact
 from app.config import Settings
 from app.infrastructure.database import close_db, init_db
-from app.service import auth, checkin
+from app.service import auth, catalog, checkin
 from app.utils.exceptions import APIError
 from app.utils.result import ORJSONResponse, bad
 from app.views import routers
@@ -34,6 +34,7 @@ SESSION_PREFIX = f"{auth.SESSION_COOKIE}=".encode()
 async def lifespan(_app: FastAPI):
     await init_db()
     scheduler.setup(checkin.tick)
+    scheduler.add_interval(catalog.check_all_uncertain, job_id="ldc-delivery-check", seconds=300)
     logger.info("提肛打卡已启动: %s", Settings.APP_BASE_URL)
     logger.info("打卡奖励为站内积分；LDC 赞助不增加积分。")
     try:

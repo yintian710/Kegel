@@ -290,3 +290,58 @@ async def test_session_cookie_signature_and_renewal(client):
     assert "linuxdo_session=" in response.headers["set-cookie"] and "Max-Age=432000" in response.headers["set-cookie"]
     forged = await client.http.get("/api/status", headers={"Cookie": f"linuxdo_session={token}x"})
     assert forged.json()["data"]["user"] is None
+
+
+async def test_no_payout_users_do_not_take_a_rank_but_keep_their_own_reward(client):
+    await open_day(client)
+    code, _ = await client.request("/api/admin/settings", {"no_payout_user_ids": ["2"], "secondary_secret": SECONDARY_SECRET}, admin=True)
+    assert code == 200
+    for rank in range(1, 10):  # 9 位普通用户已完成，下一个普通用户是第 10 名
+        await execute("INSERT INTO entries(day,user_id,username,rank,amount,completed_at,reward_status) "
+                      "VALUES ('2026-10-26',$1,'x',$2,0,1,'none')", f"filler{rank}", rank)
+
+    listed = await complete(client, 2)  # 名单用户：序号 10，奖励按原序号（第 10 名档 1000），不占名次
+    assert listed["skipped"] is True and listed["rank"] == 10 and listed["amount"] == 1000
+    normal = await complete(client, 3)  # 普通用户：序号 11，但名次 10 → 1000（若占位则是 500）
+    assert normal["skipped"] is False and normal["rank"] == 10 and normal["amount"] == 1000
+    after = await complete(client, 4)
+    assert after["rank"] == 11 and after["amount"] == 500
+
+    code, status = await client.request("/api/status", user=3)
+    board = {row["username"]: row for row in status["leaderboard"]}
+    assert board["user2"]["skipped"] is True and board["user2"]["rank"] is None
+    assert board["user3"]["skipped"] is False and board["user3"]["rank"] == 10 and board["user3"]["position"] == 11
+    assert status["entry"]["rank"] == 10 and status["entry"]["skipped"] is False
+    assert "user_id" not in board["user3"]
+
+
+async def test_streak_leaderboard_counts_workday_streaks_and_skips_listed_users(client):
+    await open_day(client)  # 测试时钟的「今天」是 2026-10-26（周一）
+    plan = {  # 用户 -> 完成日期
+        "a": ["2026-10-26", "2026-10-23", "2026-10-22"],                 # 今日 + 周五 + 周四（跨周末）→ 3
+        "b": ["2026-10-23", "2026-10-22", "2026-10-21"],                 # 今日未打，但上个工作日（周五）已打 → 连续有效，3
+        "c": ["2026-10-22"],                                             # 周五未打，连续已断 → 不上榜
+        "d": ["2026-10-26"],                                             # 仅今日 → 1
+        "e": ["2026-10-26", "2026-10-23", "2026-10-22", "2026-10-21", "2026-10-20"],  # 名单用户，5
+    }
+    for user, days in plan.items():
+        for day in days:
+            rank = (await fetch("SELECT COUNT(*)+1 AS n FROM entries WHERE day=$1", day))[0]["n"]
+            await execute("INSERT INTO entries(day,user_id,username,rank,amount,completed_at,reward_status) "
+                          "VALUES ($1,$2,$3,$4,0,1,'none')", day, user, f"user_{user}", rank)
+    code, _ = await client.request("/api/admin/settings", {"no_payout_user_ids": ["e"]}, admin=True)
+    assert code == 400  # 名单只接受纯数字 ID
+    code, _ = await client.request("/api/admin/settings", {"no_payout_user_ids": ["5"], "secondary_secret": SECONDARY_SECRET}, admin=True)
+    assert code == 200
+    await execute("UPDATE entries SET user_id='5' WHERE user_id='e'")
+
+    code, board = await client.request("/api/leaderboard/streak")
+    assert code == 200 and board["day"] == "2026-10-26"
+    rows = [(r["username"], r["streak_days"], r["rank"], r["skipped"], r["done_today"]) for r in board["items"]]
+    assert rows == [
+        ("user_e", 5, None, True, True),     # 名单用户：置灰、不占名次
+        ("user_a", 3, 1, False, True),       # 同为 3 天，今日已打卡的排前
+        ("user_b", 3, 2, False, False),
+        ("user_d", 1, 3, False, True),
+    ]
+    assert all("user_id" not in r for r in board["items"])

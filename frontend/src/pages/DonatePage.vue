@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { ApiError, donations, loginUrl, type DonationPayment, type DonationsData } from '../api'
 import { useBodyAttributes } from '../composables/useBodyAttributes'
+import ScrollTable from '../components/ScrollTable.vue'
 import { useIdentity } from '../composables/useIdentity'
 import { ft, triggerHaptic } from '../composables/usePreferences'
 
@@ -157,7 +158,7 @@ onBeforeUnmount(() => { document.removeEventListener('visibilitychange', onVisib
             <h2 class="card-title">我的赞助历史流水</h2>
             <span class="card-subtitle">登录后展示个人赞助订单</span>
           </div>
-          <div class="table-wrap" style="max-height:360px">
+          <ScrollTable :min-rows="3" :max-rows="6" :row-height="48">
             <table class="data-table">
               <thead>
                 <tr><th>时间</th><th>赞助金额</th><th>状态</th><th>订单号</th></tr>
@@ -177,7 +178,7 @@ onBeforeUnmount(() => { document.removeEventListener('visibilitychange', onVisib
                 </tr>
               </tbody>
             </table>
-          </div>
+          </ScrollTable>
         </div>
       </div>
 
@@ -193,7 +194,7 @@ onBeforeUnmount(() => { document.removeEventListener('visibilitychange', onVisib
               {{ loading ? '刷新中…' : '刷新 ⟳' }}
             </button>
           </div>
-          <div class="table-wrap" style="max-height:600px">
+          <ScrollTable :min-rows="5" :max-rows="10" :row-height="48">
             <table class="rank-table">
               <thead>
                 <tr><th>排名</th><th>用户名</th><th>赞助总额</th><th>次数</th></tr>
@@ -214,7 +215,7 @@ onBeforeUnmount(() => { document.removeEventListener('visibilitychange', onVisib
                 </tr>
               </tbody>
             </table>
-          </div>
+          </ScrollTable>
         </div>
       </div>
     </div>

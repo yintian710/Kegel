@@ -1,12 +1,14 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 import secrets
+import time
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
-from app.common.linuxdo import dispatch_ldc
+from app.common.linuxdo import dispatch_ldc, query_ldc_order
 from app.common.payment_log import payment_log
 from app.config import Settings
 from app.infrastructure.database import execute, fetch, fetch_one, write_txn
@@ -20,6 +22,7 @@ _REQUEST_ID_RE = re.compile(r"[A-Za-z0-9_-]{16,128}")
 _HOLDING = "('pending', 'success', 'simulated', 'uncertain')"
 _PRODUCT_FIELDS = {"id", "category", "name", "description", "points_price", "ldc_amount", "user_daily_limit",
                    "total_daily_limit", "is_active", "draw_count", "discount_eligible", "special_discount_bp",
+                   "promo_enabled", "promo_discount_bp", "promo_ends_at",
                    "secondary_secret", "secondary_password"}
 NO_PAYOUT_KEY = "no_payout_user_ids"
 
@@ -70,7 +73,19 @@ async def list_products(*, user_id: str | None = None, today: str = "", include_
     mine = {} if not user_id else {row["product_id"]: row["n"] for row in await fetch(
         f"SELECT product_id,COUNT(*) AS n FROM shop_purchases WHERE day=$1 AND user_id=$2 AND status IN {_HOLDING} "
         "GROUP BY product_id", today, user_id)}
-    return [_product_view(row, totals.get(row["id"], 0), mine.get(row["id"], 0)) for row in rows]
+    now = timeutil.now()
+    views = []
+    for row in rows:
+        view = _product_view(row, totals.get(row["id"], 0), mine.get(row["id"], 0))
+        active = promo_active(row, now)
+        view["promo_active"] = active
+        if user_id:
+            view["price_now"] = (await price_with_discount(row, user_id, today, now))[1]
+        else:  # 游客没有称号折扣，只看限时折扣
+            price = int(row["points_price"])
+            view["price_now"] = -(-price * int(row["promo_bp"]) // 10000) if active else price
+        views.append(view)
+    return views
 
 
 def _limit(body: dict, key: str, label: str) -> int:
@@ -135,10 +150,24 @@ async def save(body: dict) -> dict:
             raise APIError("特价折扣须为 1000–10000 的整数") from None
         if not 1000 <= special_discount_bp <= 10000:
             raise APIError("特价折扣须为 1000–10000 的整数")
+    promo_enabled = body.get("promo_enabled", False)
+    if type(promo_enabled) is not bool:
+        raise APIError("限时折扣开关须为布尔值")
+    promo_bp = promo_ends_at = None
+    if promo_enabled:
+        promo_bp, promo_ends_at = body.get("promo_discount_bp"), body.get("promo_ends_at")
+        if type(promo_bp) is not int or not 1000 <= promo_bp <= 9900:
+            raise APIError("折扣力度须为 1–9.9 折（promo_discount_bp 1000–9900）")
+        if isinstance(promo_ends_at, bool) or not isinstance(promo_ends_at, (int, float)):
+            raise APIError("请设置折扣结束时间")
+        promo_ends_at = float(promo_ends_at)
+        if promo_ends_at <= timeutil.now():
+            raise APIError("折扣结束时间须晚于当前时间")
     values = {"category": category, "name": name.strip(), "description": description.strip(),
               "points_price": price, "ldc_amount": ldc_amount, "user_daily_limit": user_limit,
               "total_daily_limit": total_limit, "is_active": int(active), "draw_count": draw_count,
-              "discount_eligible": discount_eligible, "special_discount_bp": special_discount_bp}
+              "discount_eligible": discount_eligible, "special_discount_bp": special_discount_bp,
+              "promo_enabled": int(promo_enabled), "promo_bp": promo_bp, "promo_ends_at": promo_ends_at}
     async with write_txn():
         if body.get("id") is None:
             product_id = (await ShopProduct.create(**values)).id
@@ -209,28 +238,42 @@ async def discount_saved_today(user_id: str, today: str) -> int:
     return int(row["s"])
 
 
-async def price_with_discount(product: dict, user_id: str, today: str) -> tuple[int, int, int, int]:
-    """返回 (原价, 实付, 使用的折扣 bp, 实际节省)。整个商店通用：
-    - discount_eligible=0：不打折；
-    - 特价商品 special_discount_bp 非空：用自身特价，不与称号折扣叠加；
+def promo_active(product: dict, now: float) -> bool:
+    """限时折扣是否生效：开关开启、有力度、且未到结束时间。"""
+    return (bool(product.get("promo_enabled")) and product.get("promo_bp") is not None
+            and product.get("promo_ends_at") is not None and now < float(product["promo_ends_at"]))
+
+
+async def price_with_discount(product: dict, user_id: str, today: str,
+                              now: float | None = None) -> tuple[int, int, int, int, int]:
+    """返回 (原价, 实付, 使用的称号折扣 bp, 称号折扣节省, 限时折扣节省)。整个商店通用：
+    - 商品限时折扣（promo）生效：先按 promo_bp 打折，再叠加用户称号折扣（乘法叠加）；限时折扣由管理员设定，不受每日节省上限约束；
+    - discount_eligible=0：不适用称号折扣；
+    - 无限时折扣且 special_discount_bp 非空：用自身特价，不与称号折扣叠加；
     - 否则：用用户最优称号折扣；
-    - 折扣受 DAILY_DISCOUNT_SAVE_CAP 每日节省上限约束（可为部分折扣）。
+    - 称号折扣受 DAILY_DISCOUNT_SAVE_CAP 每日节省上限约束（可为部分折扣），限时折扣的节省不计入该上限。
     """
+    now = timeutil.now() if now is None else now
     original = int(product["points_price"])
+    base, promo_saved = original, 0
+    promo = promo_active(product, now)
+    if promo:
+        base = -(-original * int(product["promo_bp"]) // 10000)
+        promo_saved = original - base
     bp = 10000
     special = product.get("special_discount_bp")
-    if special is not None:
+    if not promo and special is not None:
         bp = int(special)
     elif int(product.get("discount_eligible", 1)) == 1:
         bp = await best_discount_bp(user_id)
-    cost, used_bp, saved = original, 10000, 0
+    cost, used_bp, saved = base, 10000, 0
     if bp < 10000:
-        desired = original - (original * bp + 9999) // 10000
+        desired = base - (base * bp + 9999) // 10000
         cap_left = max(0, Settings.DAILY_DISCOUNT_SAVE_CAP - await discount_saved_today(user_id, today))
         saved = min(desired, cap_left)
-        cost = original - saved
+        cost = base - saved
         used_bp = bp if saved > 0 else 10000
-    return original, cost, used_bp, saved
+    return original, cost, used_bp, saved, promo_saved
 
 
 async def discount_view(user_id: str | None, today: str) -> dict:
@@ -276,12 +319,13 @@ async def _reserve(user: dict, product_id: int, today: str, now: float, request_
             raise ValueError(f"今日全站 LDC 兑换额度不足：剩余 {remaining:.2f} LDC，"
                              f"本次兑换 {product['ldc_amount']} LDC；不支持拆分兑换")
         order_no = f"SO-{today.replace('-', '')}-{secrets.token_hex(6).upper()}"
-        original, points_cost, used_bp, saved = await price_with_discount(product, user["id"], today)
+        original, points_cost, used_bp, saved, promo_saved = await price_with_discount(product, user["id"], today, now)
         await credits.spend_points(user, points_cost, "shop_purchase", order_no, now)
         await ShopPurchase.create(order_no=order_no, product_id=product_id, category=product["category"],
                                   product_name=product["name"], user_id=user["id"], username=user["username"],
                                   points_cost=points_cost, points_cost_original=original,
                                   points_discount_bp=used_bp, points_discount_saved=saved,
+                                  points_promo_saved=promo_saved,
                                   ldc_amount=product["ldc_amount"],
                                   status="pending", created_at=now, day=today, request_id=request_id)
         return await fetch_one("SELECT * FROM shop_purchases WHERE order_no=$1", order_no), True
@@ -349,3 +393,94 @@ async def reconcile(order_no: Any, result: Any, trade_no: Any) -> dict:
                           f"人工核对：未发货，已退还积分（原因：{order['error']}）"[:300], order_no)
         final = await fetch_one("SELECT * FROM shop_purchases WHERE order_no=$1", order_no)
     return _purchase_views([final])[0]
+
+
+# ── 发货状态核对：向 Credit 查询待核对订单 ──────────────────────────────────────
+# 查到已发货 → 标成功并回填交易号；下单满 MISSING_GRACE_SECONDS 后仍查无此单 → 判定未发货并退分；
+# 其余情况（状态未知、查询出错）一律保持待核对，不自动退分，避免重复发放。
+
+MISSING_GRACE_SECONDS = 30
+USER_CHECK_COOLDOWN = 10.0
+_last_user_check: dict[str, float] = {}
+
+
+async def _settle_checked(order_no: str, state: str, trade_no: str, now: float) -> dict:
+    """事务内按核对结果落库；订单已被并发处理（状态不再是 uncertain）则原样返回。"""
+    async with write_txn():
+        order = await fetch_one("SELECT * FROM shop_purchases WHERE order_no=$1", order_no)
+        if order["status"] == "uncertain":
+            if state == "delivered":
+                await execute("UPDATE shop_purchases SET status='success', trade_no=$1, error='' WHERE order_no=$2",
+                              trade_no, order_no)
+            else:
+                await credits.refund_points({"id": order["user_id"]}, order["points_cost"], "shop_refund",
+                                            f"refund:{order_no}", now)
+                await execute("UPDATE shop_purchases SET status='failed', error=$1 WHERE order_no=$2",
+                              f"自动核对：Credit 无此订单，判定未发货，已退还积分（原因：{order['error']}）"[:300], order_no)
+            order = await fetch_one("SELECT * FROM shop_purchases WHERE order_no=$1", order_no)
+    return order
+
+
+async def check_delivery(order_no: str, *, user_id: str | None = None, via: str = "auto") -> dict:
+    """查询一笔待核对订单。-> {"order", "outcome": success|failed|waiting|unknown|settled, "message"}"""
+    order = await fetch_one("SELECT * FROM shop_purchases WHERE order_no=$1", order_no)
+    if not order or (user_id is not None and order["user_id"] != user_id):
+        raise APIError("订单不存在", 404)
+
+    def result(row: dict, outcome: str, message: str) -> dict:
+        return {"order": _purchase_views([row])[0], "outcome": outcome, "message": message}
+
+    if order["status"] != "uncertain" or order["category"] != "LDC":
+        return result(order, "settled", "订单已处理，无需核对")
+    state, trade_no, detail = await query_ldc_order(order_no, order["ldc_amount"])
+    now = timeutil.now()
+    if state == "delivered":
+        outcome, message = "success", "Credit 确认已发货，订单已标记为成功"
+    elif state == "missing" and now - order["created_at"] < MISSING_GRACE_SECONDS:
+        outcome, message = "waiting", f"下单不满 {MISSING_GRACE_SECONDS} 秒，Credit 暂未查到该订单，请稍后再查"
+    elif state == "missing":
+        outcome, message = "failed", "Credit 无此订单，已判定未发货并退还积分"
+    else:
+        outcome, message = "unknown", detail or "暂时无法确认发货状态，请稍后再查"
+    payment_log("ldc.check", order_no=order_no, via=via, state=state, outcome=outcome, detail=detail, trade_no=trade_no)
+    if outcome in ("success", "failed"):
+        order = await _settle_checked(order_no, state, trade_no, now)
+        if order["status"] != ("success" if outcome == "success" else "failed"):
+            return result(order, "settled", "订单已被其他操作处理")
+    return result(order, outcome, message)
+
+
+async def check_delivery_for_user(user: dict, order_no: str) -> dict:
+    """用户主动查询自己的订单；同一订单有短冷却，防止刷 Credit 接口。"""
+    owner = await fetch_one("SELECT user_id FROM shop_purchases WHERE order_no=$1", order_no)
+    if not owner or owner["user_id"] != user["id"]:  # 先验归属，避免他人请求占用本人的冷却
+        raise APIError("订单不存在", 404)
+    now = time.monotonic()
+    if now - _last_user_check.get(order_no, float("-inf")) < USER_CHECK_COOLDOWN:
+        raise APIError("查询过于频繁，请稍后再试", 429)
+    if len(_last_user_check) > 1000:
+        _last_user_check.clear()
+    _last_user_check[order_no] = now
+    return await check_delivery(order_no, user_id=user["id"], via="user")
+
+
+async def check_all_uncertain(via: str = "auto", reasons: list[str] | None = None) -> dict[str, int]:
+    """逐笔核对所有待核对订单（定时任务与后台「全部查询」共用）。-> {outcome: 数量}
+
+    传入 reasons 时，把「无法确认」的原因（去重，最多 3 条）追加进去，供后台提示。
+    """
+    rows = await fetch("SELECT order_no FROM shop_purchases WHERE status='uncertain' AND category='LDC' "
+                       "ORDER BY created_at LIMIT 200")
+    tally: dict[str, int] = {}
+    for row in rows:
+        try:
+            checked = await check_delivery(row["order_no"], via=via)
+            outcome = checked["outcome"]
+            if outcome == "unknown" and reasons is not None and checked["message"] not in reasons and len(reasons) < 3:
+                reasons.append(checked["message"])
+        except Exception as exc:  # 单笔失败不影响其余订单
+            payment_log("ldc.check_error", order_no=row["order_no"], via=via, error_type=type(exc).__name__)
+            outcome = "error"
+        tally[outcome] = tally.get(outcome, 0) + 1
+        await asyncio.sleep(0.2)
+    return tally

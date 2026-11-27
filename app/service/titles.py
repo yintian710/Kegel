@@ -135,8 +135,9 @@ def _choose_rarity(pools: dict[str, list[dict]]) -> str:
 
 
 async def _load_pools() -> dict[str, list[dict]]:
-    rows = await fetch("SELECT id,code,rarity,weight FROM title_defs WHERE is_active=1 "
-                       "AND rarity IN ('N','R','SR','SSR')")
+    rows = await fetch("SELECT d.id,d.code,d.rarity,d.weight,c.name,c.description,c.icon FROM title_defs d "
+                       "LEFT JOIN title_content c ON c.title_id=d.id WHERE d.is_active=1 "
+                       "AND d.rarity IN ('N','R','SR','SSR')")
     pools: dict[str, list[dict]] = {}
     for row in rows:
         pools.setdefault(row["rarity"], []).append(row)
@@ -199,7 +200,14 @@ async def draw(user: dict, body: dict) -> dict:
                 "INSERT INTO title_draws(id,batch_id,user_id,title_id,rarity,is_new,pity_before,created_at) "
                 "VALUES ($1,$2,$3,$4,$5,$6,$7,$8)",
                 next_id(), batch_id, user["id"], picked["id"], item["rarity"], int(is_new), 0, now)
-            serialized.append({"title_id": picked["id"], "rarity": item["rarity"], "is_new": is_new})
+            serialized.append({
+                "title_id": picked["id"],
+                "rarity": item["rarity"],
+                "is_new": is_new,
+                "name": picked.get("name") or "",
+                "description": picked.get("description") or "",
+                "icon": picked.get("icon") or "",
+            })
         await _ticket_apply(user["id"], ticket_type, -1, "draw", str(batch_id), now)
         await execute("UPDATE user_title_state SET pity=0,total_draws=total_draws+$1 WHERE user_id=$2",
                       count, user["id"])
@@ -210,10 +218,21 @@ async def draw(user: dict, body: dict) -> dict:
 
 
 async def _batch_result(user_id: str, batch: dict) -> dict:
-    rows = await fetch("SELECT title_id,rarity,is_new FROM title_draws WHERE batch_id=$1 ORDER BY id", batch["id"])
+    rows = await fetch(
+        "SELECT d.title_id,d.rarity,d.is_new,c.name,c.description,c.icon "
+        "FROM title_draws d "
+        "LEFT JOIN title_content c ON c.title_id=d.title_id "
+        "WHERE d.batch_id=$1 ORDER BY d.id", batch["id"])
     state = await _state(user_id)
     return {"batch": {"id": batch["id"], "ticket_type": batch["ticket_type"], "count": batch["count"]},
-            "results": [{"title_id": r["title_id"], "rarity": r["rarity"], "is_new": bool(r["is_new"])} for r in rows],
+            "results": [{
+                "title_id": r["title_id"],
+                "rarity": r["rarity"],
+                "is_new": bool(r["is_new"]),
+                "name": r.get("name") or "",
+                "description": r.get("description") or "",
+                "icon": r.get("icon") or "",
+            } for r in rows],
             "pity": 0, "pity_limit": 0, "tickets": _tickets_of(state)}
 
 
@@ -245,16 +264,16 @@ async def purchase_ticket(user: dict, body: dict) -> dict:
             raise APIError("券商品配置错误", 503)
         order_no = f"TO-{day.replace('-', '')}-{secrets.token_hex(6).upper()}"
         from app.service import catalog as _catalog
-        original, points_cost, used_bp, saved = await _catalog.price_with_discount(product, user["id"], day)
+        original, points_cost, used_bp, saved, promo_saved = await _catalog.price_with_discount(product, user["id"], day, now)
         await credits.spend_points(user, points_cost, "ticket_purchase", order_no, now)
         await _ticket_apply(user["id"], ticket_type, 1, "purchase", order_no, now)
         await execute(
             "INSERT INTO shop_purchases(order_no,product_id,category,product_name,user_id,username,points_cost,"
             "points_cost_original,points_discount_bp,points_discount_saved,ldc_amount,status,trade_no,error,"
-            "created_at,day,request_id,draw_count) "
-            "VALUES ($1,$2,'TICKET',$3,$4,$5,$6,$7,$8,$9,'0.00','success','','',$10,$11,$12,$13)",
+            "created_at,day,request_id,draw_count,points_promo_saved) "
+            "VALUES ($1,$2,'TICKET',$3,$4,$5,$6,$7,$8,$9,'0.00','success','','',$10,$11,$12,$13,$14)",
             order_no, product_id, product["name"], user["id"], user["username"], points_cost, original,
-            used_bp, saved, now, day, request_id, draw_count)
+            used_bp, saved, now, day, request_id, draw_count, promo_saved)
         order = await fetch_one("SELECT * FROM shop_purchases WHERE order_no=$1", order_no)
         state = await _state(user["id"])
         wallet = await credits.wallet_view(user["id"])
@@ -275,6 +294,7 @@ def _order_view(order: dict) -> dict:
             "points_cost_original": order.get("points_cost_original") or order["points_cost"],
             "points_discount_bp": order.get("points_discount_bp", 10000),
             "points_discount_saved": order.get("points_discount_saved", 0),
+            "points_promo_saved": order.get("points_promo_saved", 0),
             "draw_count": order.get("draw_count", 0), "status": order["status"],
             "created_at": timeutil.iso_time(order["created_at"])}
 
@@ -474,9 +494,9 @@ async def title_view(user: dict | None) -> dict:
         item["copies"] = owned.get(int(row["id"]), 0)
         item["owned"] = item["copies"] > 0
         collection.append(item)
-    products = await fetch(
-        "SELECT id,name,description,points_price,draw_count FROM shop_products "
-        "WHERE category='TICKET' AND is_active=1 ORDER BY draw_count")
+    from app.service import catalog as _catalog
+    products = sorted(await _catalog.list_products(user_id=user["id"] if user else None, today=timeutil.day_key(),
+                                                   category="TICKET"), key=lambda p: p["draw_count"])
     recipes = await _config("ur_recipes", [])
     return {"user": user, "tickets": tickets, "pity": pity, "pity_limit": 0,
             "equipped_title_id": equipped, "collection": collection,

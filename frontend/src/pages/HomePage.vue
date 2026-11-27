@@ -3,10 +3,13 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { claim, loginUrl, session as sessionApi, status as getStatus, visit, type CheckinEntry, type Session, type StatusData } from '../api'
 import { useBodyAttributes } from '../composables/useBodyAttributes'
 import { ft, playFeedbackSound, preferenceQuery, triggerHaptic } from '../composables/usePreferences'
+import { useIdentity } from '../composables/useIdentity'
+import { readPracticePreferences } from '../composables/useLocalPractice'
 
 useBodyAttributes({ class: 'stage-wrap', data: { step: '0' } })
 
 type CompletionKind = 'server' | 'anonymous' | 'review' | 'closed' | null
+const identity = useIdentity()
 const started = ref(false)
 const busy = ref(false)
 const polling = ref(false)
@@ -21,494 +24,1157 @@ const completionKind = ref<CompletionKind>(null)
 const notice = ref('')
 const footerError = ref('')
 const now = ref(Date.now())
-const shownView = ref<'landing' | 'prompt' | 'completed'>('landing')
 const promptText = ref<string | null>(null)
 const contentEl = ref<HTMLElement | null>(null)
-const promptEl = ref<HTMLElement | null>(null)
-const activeTab = ref<'leaderboard' | 'rules'>('leaderboard')
 let noticeTimer: number | undefined
 let timer: number | undefined
 let pollTimer: number | undefined
+let rafId: number | undefined
 let unmounted = false
+
+const userPreferences = computed(() => readPracticePreferences())
 
 const repetitions = computed(() => {
   const value = Number(activeSession.value?.repetitions)
   return Number.isInteger(value) && value >= 1 && value <= 20 ? value : 3
 })
-const completed = computed(() => showResult.value || Boolean(activeSession.value?.completed) || Boolean(activeSession.value && activeSession.value.step >= repetitions.value))
+
+const completed = computed(() => {
+  return showResult.value || Boolean(activeSession.value?.completed) || Boolean(activeSession.value && activeSession.value.step >= repetitions.value)
+})
+
 const remaining = computed(() => activeSession.value ? Math.max(0, Math.ceil((readyAt.value - now.value) / 1000)) : 0)
+
 const totalStepDuration = computed(() => {
-  return Number(activeSession.value?.interval_seconds ?? activeSession.value?.min_seconds ?? statusData.value?.min_step_seconds) || 2
+  return Number(activeSession.value?.interval_seconds ?? activeSession.value?.min_seconds ?? statusData.value?.min_step_seconds) || 8
 })
-const ringProgress = computed(() => {
-  if (!activeSession.value || remaining.value <= 0) return 100
-  const total = totalStepDuration.value
-  return Math.min(100, Math.max(0, ((total - remaining.value) / total) * 100))
+
+// 连续平滑进度 (0 -> 1)
+const stepStartsAt = computed(() => {
+  return readyAt.value - totalStepDuration.value * 1000
 })
-const targetPrompt = computed<string | null>(() => {
-  if (!started.value) return null
-  if (!activeSession.value) return '开始第 1 次？'
-  if (step.value >= repetitions.value - 1) return '最后一次，加油！'
-  return `开始第 ${step.value + 2} 次？`
+
+const smoothProgress = computed(() => {
+  if (!activeSession.value || remaining.value <= 0) return completed.value ? 1 : 0
+  const duration = totalStepDuration.value * 1000
+  const elapsed = Math.max(0, now.value - stepStartsAt.value)
+  return Math.min(1, Math.max(0, elapsed / duration))
 })
-const fadeSeconds = computed(() => totalStepDuration.value / 2)
-const hint = computed(() => {
-  if (!started.value) return '点击任意位置开始'
+
+// 三阶段动态色彩及文案 (与练习中心一致)
+const currentPhase = computed(() => {
+  if (!activeSession.value || remaining.value <= 0) return null
+  const percent = smoothProgress.value * 100
+  const prefs = userPreferences.value
+  const liftEnd = prefs.liftEnd ?? 45
+  const relaxEnd = prefs.relaxEnd ?? 85
+  const names = prefs.phaseNames || ['提～', '放松', '休息']
+  if (percent < liftEnd) {
+    return {
+      index: 0,
+      name: names[0] || '提～',
+      color: '#10b981', // 翡翠绿
+      glow: 'rgba(16, 185, 129, 0.45)',
+      hint: '吸气并轻收 · 维持向上',
+    }
+  } else if (percent < relaxEnd) {
+    return {
+      index: 1,
+      name: names[1] || '放松',
+      color: '#3b82f6', // 湛蓝
+      glow: 'rgba(59, 130, 246, 0.45)',
+      hint: '呼气缓慢放松 · 保持平稳',
+    }
+  } else {
+    return {
+      index: 2,
+      name: names[2] || '休息',
+      color: '#f59e0b', // 暖金
+      glow: 'rgba(245, 158, 11, 0.45)',
+      hint: '调息静心 · 准备下一组',
+    }
+  }
+})
+
+function stepHomeSmooth(): void {
+  if (unmounted) return
+  now.value = Date.now()
+  if (activeSession.value && remaining.value > 0 && !completed.value) {
+    rafId = requestAnimationFrame(stepHomeSmooth)
+  }
+}
+
+function kickHomeRaf(): void {
+  if (rafId) cancelAnimationFrame(rafId)
+  rafId = requestAnimationFrame(stepHomeSmooth)
+}
+
+const currentStepText = computed(() => {
+  if (completed.value) return '打卡完成'
+  if (!activeSession.value) return 'Step 1 of 3'
+  const phaseText = currentPhase.value ? ` · ${currentPhase.value.name}` : ''
+  return `Step ${Math.min(step.value + 1, repetitions.value)} of ${repetitions.value}${phaseText}`
+})
+
+const breathingStateHint = computed(() => {
+  if (completed.value) return '今日打卡已达成，身心舒畅'
+  if (!started.value) return '点击任意位置或按 Space 开始'
   if (busy.value) return '正在记录，请稍候…'
-  if (!activeSession.value) return '点击页面或按任意键，开始第 1 次'
-  if (remaining.value > 0) return '轻轻收紧，缓慢放松 · 本次还剩 '
-  if (step.value < repetitions.value - 1) return `点击页面或按任意键，开始第 ${step.value + 2} 次`
+  if (!activeSession.value) return '点击开始第 1 次提肛'
+  if (remaining.value > 0) {
+    return currentPhase.value ? currentPhase.value.hint : '吸气并轻收... 维持向上'
+  }
+  if (step.value < repetitions.value - 1) return `点击进入第 ${step.value + 2} 次`
   return `${repetitions.value} 次完成，正在确认记录…`
 })
-const footerNote = computed(() => {
-  if (footerError.value) return footerError.value
-  const value = statusData.value
-  if (!value) return ''
-  const opening = value.review && !value.review.approved ? '今日访问待管理员确认 · 可以先练习' : value.is_open ? `今日打卡已开放 · ${value.total} 人完成` : `今日尚未开放 · 最晚 ${value.deadline} 北京时间开启`
-  return `${opening} · 今日 LDC 兑换额度剩余 ${value.quota.remaining} LDC`
+
+const countdownFormatted = computed(() => {
+  if (!activeSession.value || remaining.value <= 0) return '00:08'
+  const s = remaining.value
+  return `00:${s < 10 ? '0' : ''}${s}`
 })
-const completionSummary = computed(() => {
-  if (entry.value) return { titlePrefix: '今日第 ', rank: String(entry.value.rank), titleSuffix: ' 位', rewardPrefix: '本次奖励 ', amount: String(entry.value.amount), rewardSuffix: ' 站内积分' }
-  if (completionKind.value === 'closed') return { titlePrefix: '今日打卡操作完成', rank: '', titleSuffix: '', rewardPrefix: '打卡尚未开放，本次操作不计入正式排名。', amount: '', rewardSuffix: '' }
-  if (completionKind.value === 'review') return { titlePrefix: '今日练习完成', rank: '', titleSuffix: '', rewardPrefix: '今日访问需要管理员确认，暂不计奖励排名。', amount: '', rewardSuffix: '' }
-  return { titlePrefix: '今日练习完成', rank: '', titleSuffix: '', rewardPrefix: '本次访客练习已完成，登录后可参与每日正式排名。', amount: '', rewardSuffix: '' }
-})
-const rewardNote = computed(() => {
-  if (entry.value?.reward_status === 'credited') return '今日打卡奖励已成功记入站内积分钱包。'
-  if (entry.value?.reward_status === 'none') return '已记录今日排名，本名次无站内积分奖励。'
-  if (entry.value?.reward_status === 'unclaimed') return '签到积分领取不受每日 LDC 兑换额度限制。'
-  if (completionKind.value === 'closed') return `每日最晚 ${statusData.value?.deadline || '22:00'}（北京时间）开放，也可能提前开启。`
-  if (completionKind.value === 'review') return '请联系管理员确认访问记录。批准后刷新页面，开始正式打卡。'
-  return '访客操作不会生成正式打卡记录或积分。'
-})
-const statusPill = computed(() => entry.value?.reward_status === 'credited' ? '已记入钱包' : entry.value?.reward_status === 'none' ? '打卡已记录' : '')
-const quotaPercent = computed(() => {
-  const quota = statusData.value?.quota
-  const limit = Number(quota?.limit || 0)
-  return limit > 0 ? Math.min(100, Math.round(Number(quota?.used || 0) / limit * 100)) : 0
-})
+
 const rewardRules = computed(() => {
   let start = 1
   const rules = (statusData.value?.reward_tiers || []).map(tier => {
-    const label = start === tier.through ? `第 ${start} 名` : `第 ${start} - ${tier.through} 名`
+    const label = start === tier.through ? `第 ${start} 名` : `第 ${start}-${tier.through} 名`
     start = tier.through + 1
-    return { label, value: `${tier.amount} 积分`, rewarded: true }
+    return { label, value: `${tier.amount} 积分`, amount: tier.amount }
   })
-  rules.push({ label: `第 ${start} 名起`, value: '无积分', rewarded: false })
   return rules
 })
 
-const topThree = computed(() => (statusData.value?.leaderboard || []).slice(0, 3))
+const topEntries = computed(() => {
+  return (statusData.value?.leaderboard || []).slice(0, 5)
+})
 
-function errorMessage(error: unknown): string { return error instanceof Error ? error.message : '请求失败，请稍后重试。' }
 function notify(message: string): void {
   notice.value = message
-  if (noticeTimer !== undefined) window.clearTimeout(noticeTimer)
+  window.clearTimeout(noticeTimer)
   noticeTimer = window.setTimeout(() => { notice.value = '' }, 4000)
 }
-function reset(message?: string): void {
-  activeSession.value = null; step.value = 0; readyAt.value = 0; expiresAt.value = 0; showResult.value = false; completionKind.value = null
-  if (statusData.value) statusData.value.session = null
-  if (message && started.value) notify(message)
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
 }
-function applySession(value: Session): void {
-  now.value = Date.now()
-  const same = activeSession.value?.token === value.token
-  activeSession.value = value
-  step.value = Math.max(0, Math.min(Number(value.repetitions) || 3, Number(value.step) || 0))
-  const nextReady = Date.now() + Math.max(0, Number(value.wait_seconds) || 0) * 1000
-  readyAt.value = same ? Math.min(readyAt.value, nextReady) : nextReady
-  expiresAt.value = value.expires_in === null ? 0 : Date.now() + Math.max(0, Number(value.expires_in) || 0) * 1000
-  completionKind.value = value.eligible ? 'server' : !statusData.value?.user ? 'anonymous' : statusData.value.review ? 'review' : 'closed'
-  showResult.value = Boolean(value.completed) || value.step >= value.repetitions
-}
-function applyStatus(value: StatusData): void {
-  const previousDay = statusData.value?.day
-  statusData.value = value
-  if (value.session && (value.session.mode !== 'manual' || value.session.repetitions !== 3)) value.session = null
-  if (previousDay && previousDay !== value.day) { entry.value = null; reset('新的一天开始了，点击页面开始今天的练习。') }
-  if (value.entry) entry.value = value.entry
-  if (started.value && value.session && !value.session.completed && value.session.step < value.session.repetitions) applySession(value.session)
-  else if (started.value && activeSession.value && !completed.value) reset('十分钟未进入下一次，本轮已失效，请从第一次重新开始。')
-}
-async function pollStatus(): Promise<void> {
-  if (!started.value || busy.value || polling.value || document.hidden) return
-  polling.value = true
-  try { applyStatus(await getStatus()); footerError.value = '' }
-  catch (error) { footerError.value = `状态更新暂不可用 · ${errorMessage(error)}` }
-  finally { polling.value = false }
-}
-async function completeSession(): Promise<void> {
-  if (busy.value || polling.value || !activeSession.value || step.value !== repetitions.value - 1 || Date.now() < readyAt.value) return
-  busy.value = true
-  try {
-    const response = await sessionApi.complete(activeSession.value.token)
-    applySession(response.session); entry.value = response.entry
-    applyStatus(await getStatus())
-    playFeedbackSound('complete')
-    triggerHaptic([30, 50, 40])
-  } catch (error) { notify(errorMessage(error)) }
-  finally { busy.value = false }
-}
-function wait(milliseconds: number): Promise<void> { return new Promise(resolve => window.setTimeout(resolve, milliseconds)) }
-let promptFading = false
-let shownPrompt: string | null = null
-let pendingPrompt: string | null = null
-async function fadePrompt(hidden: boolean): Promise<void> {
-  const element = promptEl.value
-  if (!element) return
-  void getComputedStyle(element).opacity
-  element.classList.toggle('practice-text-fading', hidden)
-  const transitions = element.getAnimations().filter(animation => (animation as CSSTransition).transitionProperty === 'opacity')
-  await Promise.all(transitions.map(animation => animation.finished.catch(() => {})))
-}
-async function runPromptFade(): Promise<void> {
-  promptFading = true
-  try {
-    while (pendingPrompt !== null) {
-      if (pendingPrompt === shownPrompt) { pendingPrompt = null; break }
-      await fadePrompt(true)
-      const next = pendingPrompt
-      if (next === null) break
-      pendingPrompt = null
-      promptText.value = next; shownPrompt = next
-      await nextTick()
-      await fadePrompt(false)
-    }
-  } finally { promptFading = false }
-}
-function setPrompt(text: string | null): void {
-  if (text === null || !activeSession.value) {
-    pendingPrompt = null; shownPrompt = text; promptText.value = text
-    promptEl.value?.classList.remove('practice-text-fading')
-    return
+
+function applyStatus(data: StatusData): void {
+  statusData.value = data
+  if (data.user && data.wallet) {
+    identity.setWallet(data.wallet)
   }
-  pendingPrompt = text
-  if (!promptFading) void runPromptFade()
+  if (data.streak_days !== undefined) {
+    identity.setStreak(data.streak_days)
+  }
 }
-let desiredView: 'prompt' | 'completed' = 'prompt'
-let viewSwitching = false
-function switchView(target: 'prompt' | 'completed'): void {
-  desiredView = target
-  if (viewSwitching) return
-  const content = contentEl.value
-  if (shownView.value === desiredView || shownView.value === 'landing' || !content) { shownView.value = desiredView; return }
-  viewSwitching = true
-  void (async () => {
-    while (shownView.value !== desiredView) {
-      content.classList.add('scene-fading')
-      await wait(220)
-      shownView.value = desiredView
-      content.classList.remove('scene-fading')
-      await wait(220)
-    }
-    viewSwitching = false
-  })()
+
+function applySession(item: Session): void {
+  activeSession.value = item
+  step.value = item.step
+  if (item.wait_seconds > 0) {
+    readyAt.value = Date.now() + item.wait_seconds * 1000
+    kickHomeRaf()
+  } else {
+    readyAt.value = Date.now()
+  }
+  if (item.expires_in) {
+    expiresAt.value = Date.now() + item.expires_in * 1000
+  }
 }
-watch(targetPrompt, setPrompt, { immediate: true })
-watch(() => started.value ? (completed.value ? 'completed' : 'prompt') : null, target => { if (target) switchView(target) }, { immediate: true })
-watch(step, value => { document.body.dataset.step = String(value) })
+
+async function pollStatus(): Promise<void> {
+  if (polling.value) return
+  polling.value = true
+  try {
+    const data = await getStatus()
+    applyStatus(data)
+  } catch {
+    // 忽略轮询偶发错误
+  } finally {
+    polling.value = false
+  }
+}
 
 async function advance(): Promise<void> {
-  if (busy.value || polling.value || completed.value || promptFading) return
-  if (activeSession.value && expiresAt.value && Date.now() >= expiresAt.value) reset('十分钟未进入下一次，请从第一次重新开始。')
-  if (activeSession.value && step.value === repetitions.value - 1 && Date.now() >= readyAt.value) return completeSession()
+  if (busy.value || completed.value) return
+  if (!started.value) {
+    started.value = true
+    await startSession()
+    return
+  }
+  if (!activeSession.value) {
+    await startSession()
+    return
+  }
+  if (remaining.value > 0) return
+  if (step.value < repetitions.value - 1) {
+    await advanceStep()
+  } else {
+    await completeSession()
+  }
+}
+
+async function startSession(): Promise<void> {
   busy.value = true
   try {
-    if (!started.value) {
-      started.value = true
-      if (pollTimer === undefined) pollTimer = window.setInterval(pollStatus, 20_000)
-      if (!statusData.value) {
-        const initialStatus = await visitPromise
-        if (initialStatus) applyStatus(initialStatus)
-      }
-      playFeedbackSound('step')
-      triggerHaptic(30)
-      const response = await sessionApi.start({ mode: 'manual', repetitions: 3 })
-      showResult.value = false
-      applySession(response.session)
-      return
-    }
-    if (!activeSession.value) {
-      const response = await sessionApi.start({ mode: 'manual', repetitions: 3 })
-      showResult.value = false
-      applySession(response.session)
-      playFeedbackSound('step')
-      triggerHaptic(30)
-      return
-    }
-    if (Date.now() < readyAt.value) return
+    const response = await sessionApi.start()
+    applySession(response.session)
+    playFeedbackSound('step')
+    triggerHaptic(20)
+  } catch (error) {
+    notify(errorMessage(error))
+  } finally {
+    busy.value = false
+  }
+}
+
+async function advanceStep(): Promise<void> {
+  if (!activeSession.value) return
+  busy.value = true
+  try {
     const response = await sessionApi.step(activeSession.value.token)
     applySession(response.session)
     playFeedbackSound('step')
     triggerHaptic(30)
-  } catch (error) { notify(errorMessage(error)) }
-  finally { busy.value = false }
+  } catch (error) {
+    notify(errorMessage(error))
+  } finally {
+    busy.value = false
+  }
+}
+
+async function completeSession(): Promise<void> {
+  if (!activeSession.value) return
+  busy.value = true
+  try {
+    const response = await sessionApi.complete(activeSession.value.token)
+    applySession(response.session)
+    if (response.entry) {
+      entry.value = response.entry
+      completionKind.value = 'server'
+      if (response.entry.streak_days !== undefined) {
+        identity.setStreak(response.entry.streak_days)
+      }
+    }
+    showResult.value = true
+    playFeedbackSound('complete')
+    triggerHaptic([40, 50, 40])
+    notify('🎉 恭喜！今日 3 组提肛打卡完成！')
+    await pollStatus()
+  } catch (error) {
+    notify(errorMessage(error))
+  } finally {
+    busy.value = false
+  }
 }
 
 async function claimReward(): Promise<void> {
-  if (!entry.value) { window.location.assign(loginUrl('/')); return }
+  if (!entry.value) {
+    window.location.assign(loginUrl('/'))
+    return
+  }
   if (busy.value || entry.value.reward_status !== 'unclaimed') return
   busy.value = true
   try {
-    const response = await claim(); entry.value = response.entry
-    if (statusData.value) { statusData.value.entry = response.entry; statusData.value.wallet = response.wallet; statusData.value.quota = response.quota }
-    notify('🎉 恭喜！站内积分已成功到账。')
+    const response = await claim()
+    entry.value = response.entry
+    if (statusData.value) {
+      statusData.value.entry = response.entry
+      statusData.value.wallet = response.wallet
+      statusData.value.quota = response.quota
+    }
+    identity.setWallet(response.wallet)
+    notify('🎉 站内积分领取成功，已存入您的钱包！')
     playFeedbackSound('complete')
     triggerHaptic([30, 40, 30])
-  } catch (error) { notify(errorMessage(error)) }
-  finally { busy.value = false; await pollStatus() }
+  } catch (error) {
+    notify(errorMessage(error))
+  } finally {
+    busy.value = false
+    await pollStatus()
+  }
 }
+
 function stageClick(event: MouseEvent): void {
-  if ((event.target as Element).closest('a, button, input, textarea, select, summary, [contenteditable], [data-interactive], .toast-notice')) return
+  if ((event.target as Element).closest('a, button, input, textarea, select, [contenteditable], [data-interactive], .toast-notice')) return
   void advance()
 }
+
 function stageKey(event: KeyboardEvent): void {
-  if (event.repeat || event.isComposing || event.ctrlKey || event.altKey || event.metaKey || event.shiftKey || ['Tab', 'Escape', 'Shift', 'Control', 'Alt', 'Meta', 'CapsLock', 'Fn', 'Unidentified'].includes(event.key) || (event.target as Element).closest('a, button, input, textarea, select, summary, [contenteditable], [data-interactive]')) return
-  event.preventDefault(); void advance()
+  if (event.repeat || event.isComposing || event.ctrlKey || event.altKey || event.metaKey || event.shiftKey || ['Tab', 'Escape'].includes(event.key) || (event.target as Element).closest('a, button, input, textarea, select, [contenteditable], [data-interactive]')) return
+  if (event.code === 'Space' || event.key === 'Enter') {
+    event.preventDefault()
+    void advance()
+  }
 }
 
-const visitPromise = visit().then(value => {
-  if (unmounted) return value
-  applyStatus(value)
-  const done = value.entry || (value.session?.completed || (value.session && value.session.step >= value.session.repetitions))
-  if (done) {
-    started.value = true
-    if (pollTimer === undefined) pollTimer = window.setInterval(pollStatus, 20_000)
-    if (value.entry) { entry.value = value.entry; completionKind.value = 'server' }
-    else if (value.session) applySession(value.session)
-    showResult.value = true
+onMounted(async () => {
+  try {
+    const value = await visit()
+    applyStatus(value)
+    if (value.entry || (value.session?.completed || (value.session && value.session.step >= value.session.repetitions))) {
+      started.value = true
+      if (value.entry) {
+        entry.value = value.entry
+        completionKind.value = 'server'
+      } else if (value.session) {
+        applySession(value.session)
+      }
+      showResult.value = true
+    }
+  } catch (error) {
+    notify(errorMessage(error))
   }
-  return value
-}).catch(error => { notify(errorMessage(error)); return null })
 
-onMounted(() => {
   timer = window.setInterval(() => {
     now.value = Date.now()
     if (!started.value || busy.value || polling.value || completed.value) return
-    if (activeSession.value && expiresAt.value && Date.now() >= expiresAt.value) { reset('十分钟未进入下一次，本轮已失效，请从第一次重新开始。'); return }
-    if (activeSession.value && !document.hidden && Date.now() >= readyAt.value && step.value === repetitions.value - 1) void completeSession()
+    if (activeSession.value && expiresAt.value && Date.now() >= expiresAt.value) {
+      notify('十分钟未进入下一次，本轮已失效，请重新开始。')
+      activeSession.value = null
+      started.value = false
+      return
+    }
+    if (activeSession.value && !document.hidden && Date.now() >= readyAt.value && step.value === repetitions.value - 1) {
+      void completeSession()
+    }
   }, 250)
+  pollTimer = window.setInterval(pollStatus, 20_000)
 })
-onBeforeUnmount(() => { unmounted = true; if (timer) clearInterval(timer); if (pollTimer) clearInterval(pollTimer); if (noticeTimer) clearTimeout(noticeTimer) })
+
+onBeforeUnmount(() => {
+  unmounted = true
+  if (timer) clearInterval(timer)
+  if (pollTimer) clearInterval(pollTimer)
+  if (noticeTimer) clearTimeout(noticeTimer)
+  if (rafId) cancelAnimationFrame(rafId)
+})
 </script>
 
 <template>
-  <main class="stage-main" tabindex="0" :role="activeSession && remaining > 0 ? 'region' : 'button'" :aria-label="ft(activeSession && remaining > 0 ? `正在进行第 ${step + 1} 次练习，等待倒计时` : `开始第 ${activeSession ? Math.min(step + 2, repetitions) : 1} 次练习，点击开始`)" @click="stageClick" @keydown="stageKey">
-    <div ref="contentEl" class="stage-content">
-      <!-- 训练与打卡进行中界面 -->
-      <div v-if="shownView !== 'completed'" class="hero-stage-box">
-        <!-- 灵动呼吸环视觉中心 -->
-        <div class="breathing-ring-wrapper" :class="{ 'is-active': activeSession && remaining > 0, 'is-ready': activeSession && remaining <= 0 }">
-          <div class="breathing-glow-aura" />
-          <svg class="breathing-ring-svg" viewBox="0 0 240 240">
-            <circle class="ring-bg" cx="120" cy="120" r="102" />
+  <main
+    class="home-stage-wrap"
+    tabindex="0"
+    role="button"
+    aria-label="打卡中心，按空格键或点击操作"
+    @click="stageClick"
+    @keydown="stageKey"
+  >
+    <!-- 空灵禅意背景图腾 (远山、微雾、叠石与荷花枝) -->
+    <div class="zen-background-layer" aria-hidden="true">
+      <div class="zen-leaf-corner" />
+      <div class="zen-mist-hills" />
+      <div class="zen-stones-graphic" />
+    </div>
+
+    <div ref="contentEl" class="home-content-container">
+      <!-- 居中核心打卡舞台 (Hero Stage) -->
+      <section class="breathing-hero-stage">
+        <div
+          class="breathing-ring-card"
+          :class="{
+            'is-breathing': activeSession && remaining > 0,
+            'is-completed': completed
+          }"
+        >
+          <!-- 呼吸光晕与粒子 -->
+          <div
+            class="ring-glow-halo"
+            :style="{
+              background: 'radial-gradient(circle, ' + (currentPhase?.glow || (completed ? 'rgba(16, 185, 129, 0.3)' : 'rgba(13, 148, 136, 0.15)')) + ' 0%, transparent 75%)'
+            }"
+          />
+
+          <!-- 发光 SVG 圆环进度条 -->
+          <svg class="breathing-svg" viewBox="0 0 280 280">
+            <!-- 背景外细轨道 -->
+            <circle class="ring-track" cx="140" cy="140" r="124" />
+            <!-- 动态环形进度条 (缓缓匀速旋转 + 随阶段变色) -->
             <circle
               v-if="activeSession && remaining > 0"
-              class="ring-progress-bar"
-              cx="120"
-              cy="120"
-              r="102"
-              :stroke-dasharray="640"
-              :stroke-dashoffset="640 - (640 * ringProgress) / 100"
+              class="ring-indicator"
+              cx="140"
+              cy="140"
+              r="124"
+              :stroke="currentPhase?.color || '#10b981'"
+              :stroke-dasharray="779"
+              :stroke-dashoffset="779 * (1 - smoothProgress)"
+              :style="{ filter: 'drop-shadow(0 0 10px ' + (currentPhase?.color || '#10b981') + ')' }"
+            />
+            <!-- 完成状态下的高光环 -->
+            <circle
+              v-else-if="completed"
+              class="ring-completed-glow"
+              cx="140"
+              cy="140"
+              r="124"
             />
           </svg>
-          <div class="ring-inner-content">
-            <span v-if="activeSession && remaining > 0" class="ring-phase-badge">
-              第 {{ step + 1 }} / {{ repetitions }} 次 · 保持中
+
+          <!-- 环内核心信息排版 -->
+          <div class="ring-inner-box">
+            <!-- 顶部动作/健康状态图标 -->
+            <div class="ring-icon-box">
+              <span v-if="completed">🎉</span>
+              <span v-else-if="activeSession && remaining > 0">{{ currentPhase?.index === 0 ? '🫁' : currentPhase?.index === 1 ? '🌊' : '✨' }}</span>
+              <span v-else>🌿</span>
+            </div>
+
+            <!-- 阶段组数徽章 -->
+            <span
+              class="ring-step-pill"
+              :style="{
+                color: currentPhase?.color || (completed ? 'var(--emerald)' : 'var(--primary)'),
+                background: (currentPhase?.color || (completed ? '#10b981' : '#0d9488')) + '18',
+                borderColor: (currentPhase?.color || (completed ? '#10b981' : '#0d9488')) + '35'
+              }"
+            >
+              {{ currentStepText }}
             </span>
-            <div v-if="activeSession && remaining > 0" class="ring-timer-text">
-              00:0{{ remaining }}
+
+            <!-- 超大等宽倒计时数字 -->
+            <div class="ring-timer-digits">
+              {{ completed ? '00:00' : countdownFormatted }}
             </div>
-            <div v-else-if="!started" class="ring-idle-icon">
-              ✨
+
+            <!-- 呼吸动作指引文案 -->
+            <div
+              class="ring-instruction"
+              :style="{ color: currentPhase?.color || (completed ? 'var(--emerald)' : 'var(--text-main)') }"
+            >
+              {{ breathingStateHint }}
             </div>
-            <div v-else class="ring-idle-icon">
-              👉
-            </div>
-            <span class="ring-action-hint">
-              {{ activeSession && remaining > 0 ? '轻轻收紧 · 缓慢放松' : (started ? '点击进入下一次' : '点击屏幕开始') }}
-            </span>
           </div>
         </div>
 
-        <h1 id="prompt" ref="promptEl" class="landing-prompt" :style="{ '--prompt-fade-duration': `${fadeSeconds}s` }" aria-live="polite" aria-atomic="true">
-          <template v-if="promptText === null">你今天<span class="prompt-accent">{{ ft('提肛') }}</span>了吗？</template>
-          <template v-else>{{ promptText }}</template>
-        </h1>
-        <p class="landing-sub">
-          <span>{{ hint }}</span>
-          <span id="stageCountdown" style="display:none">{{ remaining > 0 ? `${remaining} 秒` : '' }}</span>
-        </p>
-
-        <!-- 3步步进指示灯 -->
-        <div class="step-nodes-container" aria-label="打卡三步进度">
+        <!-- 3步打卡步进小节点 -->
+        <div class="step-progress-dots" aria-label="三步练习进程">
           <div
-            v-for="index in repetitions"
-            :key="index"
-            class="step-node-item"
+            v-for="idx in repetitions"
+            :key="idx"
+            class="progress-dot"
             :class="{
-              completed: activeSession && index - 1 < step,
-              current: activeSession && index - 1 === step,
-              pending: !activeSession || index - 1 > step
+              done: completed || (activeSession && idx - 1 < step),
+              active: activeSession && idx - 1 === step,
+              idle: !activeSession && !completed
             }"
           >
-            <div class="step-node-bubble">
-              <span v-if="activeSession && index - 1 < step">✓</span>
-              <span v-else>{{ index }}</span>
-            </div>
-            <span class="step-node-label">第 {{ index }} 次</span>
+            <span class="dot-num">{{ (completed || (activeSession && idx - 1 < step)) ? '✓' : idx }}</span>
+            <span class="dot-text">第 {{ idx }} 组</span>
           </div>
         </div>
 
-        <!-- 兼容原测试选择器 -->
-        <div v-if="activeSession && !completed" class="dots-progress" aria-hidden="true" style="display:none">
-          <span v-for="index in repetitions" :key="index" :class="{ active: index - 1 <= step }" />
+        <!-- 快捷操作提示 -->
+        <div class="stage-sub-hint">
+          <span v-if="!completed">按 <kbd>Space</kbd> 空格键或点击屏幕任意位置进入下一步</span>
+          <span v-else class="text-success">🎉 今日打卡任务已顺利达成！请在右侧奖励栏领取积分。</span>
         </div>
-      </div>
+      </section>
 
-      <!-- 打卡完成结算界面 -->
-      <section v-else class="completion-container" data-interactive>
-        <div class="completion-card">
-          <div class="completion-check-wrap">
-            <div class="check-aura" />
-            <div class="check-circle">
-              <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" />
-              </svg>
+      <!-- 底部 Bento Grid 双栏展示 (今日排行榜 vs 今日打卡奖励) -->
+      <section class="home-bento-grid" data-interactive>
+        <!-- 左卡片: 今日排行榜 -->
+        <div class="bento-card leaderboard-card">
+          <div class="bento-card-header">
+            <div class="bento-title-group">
+              <span class="bento-icon">🏆</span>
+              <h2 class="bento-title">今日排行榜</h2>
+              <span class="live-update-badge">
+                <span class="live-dot" /> 实时更新
+              </span>
             </div>
+            <RouterLink class="bento-more-link" to="/leaderboard">
+              查看全部 ➔
+            </RouterLink>
           </div>
-          <div class="completion-info">
-            <h2 class="completion-title">
-              {{ completionSummary.titlePrefix }}<span class="rank-num">{{ completionSummary.rank }}</span>{{ completionSummary.titleSuffix }}
-            </h2>
-            <p class="completion-reward-text">
-              {{ completionSummary.rewardPrefix }}<b>{{ completionSummary.amount }}</b>{{ completionSummary.rewardSuffix }}
-            </p>
-            <p v-if="entry" class="completion-streak-text">
-              已连续 <b>{{ entry.streak_days ?? 0 }}</b> 天打卡（只计入工作日），每多一天获取积分提升 1%，最高 100%
-            </p>
-            <div class="completion-actions">
-              <button
-                v-if="entry ? entry.reward_status === 'unclaimed' : completionKind !== 'closed' && completionKind !== 'review'"
-                class="btn-primary btn-claim"
-                type="button"
-                :disabled="busy || (!entry && !statusData?.oauth_ready)"
-                @click="claimReward"
-              >
-                {{ entry ? (busy ? '正在领取…' : '领取站内积分 💰') : statusData?.oauth_ready ? 'LINUX DO 登录参与排名' : '登录暂未配置' }}
-              </button>
-              <RouterLink class="btn-secondary" to="/practice" :query="preferenceQuery()">{{ ft('进入提肛练习') }} ➔</RouterLink>
-              <span v-if="statusPill" class="status-pill" :class="{ credited: entry?.reward_status === 'credited' }">{{ statusPill }}</span>
-            </div>
-            <p class="status-copy" style="font-size:13px;color:var(--text-muted);margin-top:12px" aria-live="polite">{{ rewardNote }}</p>
-          </div>
-        </div>
 
-        <!-- 选项卡切换: 今日排行榜 vs 奖励规则与兑换额度 -->
-        <div class="home-tabs-container">
-          <div class="home-tabs-header">
-            <button
-              type="button"
-              class="home-tab-btn"
-              :class="{ active: activeTab === 'leaderboard' }"
-              @click="activeTab = 'leaderboard'"
+          <div class="leaderboard-list">
+            <div
+              v-for="item in topEntries"
+              :key="item.position"
+              class="leaderboard-item"
+              :class="{
+                'is-skipped': item.skipped,
+                'top-1': item.rank === 1,
+                'top-2': item.rank === 2,
+                'top-3': item.rank === 3,
+                'is-self': item.username === statusData?.user?.username
+              }"
             >
-              🏆 今日打卡英雄榜 <span class="tab-badge">{{ statusData?.total || 0 }} 人</span>
-            </button>
-            <button
-              type="button"
-              class="home-tab-btn"
-              :class="{ active: activeTab === 'rules' }"
-              @click="activeTab = 'rules'"
+              <!-- 奖牌/名次 -->
+              <div class="rank-medal-box">
+                <span v-if="item.rank === 1" class="medal-gold">🥇</span>
+                <span v-else-if="item.rank === 2" class="medal-silver">🥈</span>
+                <span v-else-if="item.rank === 3" class="medal-bronze">🥉</span>
+                <span v-else-if="item.skipped" class="medal-number" title="不计入排名">—</span>
+                <span v-else class="medal-number">{{ item.rank }}</span>
+              </div>
+
+              <!-- 头像与用户名 -->
+              <div class="user-meta">
+                <div class="user-avatar-circle">
+                  {{ item.username.slice(0, 1).toUpperCase() }}
+                </div>
+                <div class="user-details">
+                  <span class="username-text">@{{ item.username }}</span>
+                  <span v-if="item.username === statusData?.user?.username" class="self-tag">你</span>
+                </div>
+              </div>
+
+              <!-- 连续打卡徽章 (假定默认展示或联动) -->
+              <div v-if="item.skipped" class="skipped-tag">不计排名</div>
+              <div v-else class="streak-tag">
+                <span>🔥 连续打卡</span>
+              </div>
+
+              <!-- 奖励积分 -->
+              <div class="reward-points">
+                +{{ item.amount }} 分
+              </div>
+
+              <!-- 完成绿色对勾 -->
+              <div class="check-mark">
+                ✓
+              </div>
+            </div>
+
+            <div v-if="!topEntries.length" class="empty-list-hint">
+              <span>🌟 今日第一位登顶者虚位以待，快来打卡吧！</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- 右卡片: 今日打卡奖励与领取 -->
+        <div class="bento-card rewards-card">
+          <div class="bento-card-header">
+            <div class="bento-title-group">
+              <span class="bento-icon">🎁</span>
+              <h2 class="bento-title">今日打卡奖励</h2>
+            </div>
+            <div class="deadline-pill">
+              🕒 开放打卡时间 {{ statusData?.deadline ?? '22:00' }}
+            </div>
+          </div>
+
+          <!-- 阶梯奖励列表 -->
+          <div class="rewards-tiers-list">
+            <div
+              v-for="tier in rewardRules"
+              :key="tier.label"
+              class="reward-tier-row"
             >
-              📜 奖励规则与 LDC 额度
+              <div class="tier-left">
+                <span class="crown-icon">👑</span>
+                <span class="tier-label">{{ tier.label }}</span>
+              </div>
+              <div class="tier-amount">
+                <strong>{{ tier.amount }}</strong> 积分
+              </div>
+            </div>
+          </div>
+
+          <!-- 打卡结算领奖区 (当用户已完成打卡时高亮) -->
+          <div v-if="entry" class="claim-action-panel">
+            <div class="claim-info">
+              <div class="claim-rank">
+                今日排名：<strong v-if="entry.skipped">不计入排名</strong><strong v-else>第 {{ entry.rank }} 位</strong>
+              </div>
+              <div class="claim-pts">奖励积分：<strong>{{ entry.amount }} 积分</strong></div>
+            </div>
+            <button
+              v-if="entry.reward_status === 'unclaimed'"
+              class="btn-primary claim-submit-btn"
+              type="button"
+              :disabled="busy"
+              @click="claimReward"
+            >
+              {{ busy ? '领取中…' : '立即领取积分 💰' }}
             </button>
-          </div>
-
-          <!-- TAB 1: 今日打卡榜 (含前三名高光领奖台) -->
-          <div v-show="activeTab === 'leaderboard'" class="card home-tab-panel">
-            <!-- 领奖台 (Top 3 Podium) -->
-            <div v-if="topThree.length" class="podium-section">
-              <!-- 第 2 名 (银牌) -->
-              <div v-if="topThree[1]" class="podium-card podium-rank-2" :class="{ 'is-me': topThree[1].username === statusData?.user?.username }">
-                <span class="podium-crown">🥈</span>
-                <span class="podium-username">@{{ topThree[1].username }}</span>
-                <span class="podium-score">{{ topThree[1].amount }} 积分</span>
-                <div class="podium-stand stand-silver">2</div>
-              </div>
-              <!-- 第 1 名 (金牌) -->
-              <div v-if="topThree[0]" class="podium-card podium-rank-1" :class="{ 'is-me': topThree[0].username === statusData?.user?.username }">
-                <span class="podium-crown">👑</span>
-                <span class="podium-username">@{{ topThree[0].username }}</span>
-                <span class="podium-score">{{ topThree[0].amount }} 积分</span>
-                <div class="podium-stand stand-gold">1</div>
-              </div>
-              <!-- 第 3 名 (铜牌) -->
-              <div v-if="topThree[2]" class="podium-card podium-rank-3" :class="{ 'is-me': topThree[2].username === statusData?.user?.username }">
-                <span class="podium-crown">🥉</span>
-                <span class="podium-username">@{{ topThree[2].username }}</span>
-                <span class="podium-score">{{ topThree[2].amount }} 积分</span>
-                <div class="podium-stand stand-bronze">3</div>
-              </div>
-            </div>
-
-            <!-- 其余排名表格 -->
-            <div class="table-wrap" style="max-height:380px">
-              <table class="rank-table">
-                <thead>
-                  <tr><th>名次</th><th>用户名</th><th>奖励积分</th></tr>
-                </thead>
-                <tbody>
-                  <tr v-if="!statusData?.leaderboard.length">
-                    <td colspan="3" style="text-align:center;color:var(--text-dim);padding:24px">今天的第一份向上，正在路上。</td>
-                  </tr>
-                  <tr
-                    v-for="record in statusData?.leaderboard || []"
-                    :key="`${record.rank}-${record.username}`"
-                    :class="{ 'current-user': record.username === statusData?.user?.username }"
-                  >
-                    <td>
-                      <span v-if="record.rank <= 3" class="rank-badge" :class="`rank-${record.rank}`">{{ record.rank }}</span>
-                      <template v-else>{{ record.rank }}</template>
-                    </td>
-                    <td>{{ record.username === statusData?.user?.username ? `你 (@${record.username})` : `@${record.username}` }}</td>
-                    <td style="font-weight:600;color:var(--primary)">{{ record.amount }} 分</td>
-                  </tr>
-                </tbody>
-              </table>
+            <div v-else class="claimed-badge">
+              ✓ 积分已到账
             </div>
           </div>
 
-          <!-- TAB 2: 奖励规则与兑换额度 -->
-          <div v-show="activeTab === 'rules'" class="card home-tab-panel">
-            <h4 class="card-title" style="margin-bottom:12px">名次奖励档位</h4>
-            <ul class="rules-list">
-              <li v-for="rule in rewardRules" :key="rule.label">
-                <span class="tier-range">{{ rule.label }}</span>
-                <span class="tier-val" :style="rule.rewarded ? undefined : { color: 'var(--text-dim)' }">{{ rule.value }}</span>
-              </li>
-            </ul>
+          <div v-else-if="!statusData?.user" class="login-prompt-box">
+            <p>登录 LINUX DO 账号后完成打卡，即可参与每日排位并赢取积分奖励。</p>
+            <RouterLink class="btn-primary btn-sm" :to="loginUrl('/')">
+              立即登录
+            </RouterLink>
+          </div>
 
-            <div class="quota-box" style="margin-top:24px">
-              <div class="card-header-line" style="margin-bottom:10px">
-                <h4 class="card-title" style="font-size:15px">全站每日 LDC 兑换额度 <span class="card-subtitle">每日北京时间 00:00 重置</span></h4>
-              </div>
-              <div class="quota-labels">
-                <span>今日已兑换 {{ statusData?.quota.used || '0.00' }} / {{ statusData?.quota.limit || '0.00' }} LDC</span>
-                <span style="color:var(--primary);font-weight:700">剩余 {{ statusData?.quota.remaining || '0.00' }} LDC</span>
-              </div>
-              <div class="quota-bar-track">
-                <div class="quota-bar-fill" :style="{ width: `${quotaPercent}%` }" />
-              </div>
-            </div>
+          <!-- 底部说明信息 -->
+          <div class="card-footer-tip">
+            <span>💡 提示：每日 {{ statusData?.deadline ?? '22:00' }} 开放打卡，开放后完成打卡即可参与每日积分瓜分。</span>
           </div>
         </div>
       </section>
     </div>
+
+    <!-- 底部轻提示 -->
+    <div v-if="notice" class="toast-notice" role="status" aria-live="polite">
+      {{ notice }}
+    </div>
   </main>
-  <footer v-if="started" style="padding:24px;text-align:center;font-size:12px;color:var(--text-dim)">
-    <span>{{ footerNote }}</span> · <span>慢一点，也向上一点。</span>
-  </footer>
-  <div v-if="notice" class="toast-notice" role="status" aria-live="polite">{{ notice }}</div>
 </template>
+
+<style scoped>
+.home-stage-wrap {
+  position: relative;
+  min-height: calc(100vh - 65px);
+  padding: 30px 24px 60px;
+  outline: none;
+  overflow: hidden;
+}
+
+/* 禅意水墨意境装饰层 */
+.zen-background-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  overflow: hidden;
+}
+
+.zen-leaf-corner {
+  position: absolute;
+  top: -20px;
+  left: -20px;
+  width: 260px;
+  height: 260px;
+  background: radial-gradient(circle at 20% 20%, rgba(13, 148, 136, 0.12) 0%, transparent 60%);
+  border-radius: 50%;
+  filter: blur(30px);
+}
+
+.zen-mist-hills {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 240px;
+  background: linear-gradient(180deg, transparent 0%, rgba(204, 251, 241, 0.25) 100%);
+  pointer-events: none;
+}
+
+[data-theme="dark"] .zen-mist-hills {
+  background: linear-gradient(180deg, transparent 0%, rgba(20, 184, 166, 0.05) 100%);
+}
+
+.home-content-container {
+  position: relative;
+  z-index: 1;
+  max-width: 1180px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 36px;
+}
+
+/* ================= 核心呼吸舞台 ================= */
+.breathing-hero-stage {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 20px 0 10px;
+}
+
+.breathing-ring-card {
+  position: relative;
+  width: 280px;
+  height: 280px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.breathing-ring-card:hover {
+  transform: scale(1.02);
+}
+
+.ring-glow-halo {
+  position: absolute;
+  inset: 10px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(13, 148, 136, 0.15) 0%, rgba(45, 212, 191, 0.05) 60%, transparent 75%);
+  filter: blur(16px);
+  transition: all 0.5s ease;
+}
+
+.breathing-ring-card.is-breathing .ring-glow-halo {
+  background: radial-gradient(circle, rgba(13, 148, 136, 0.28) 0%, rgba(45, 212, 191, 0.12) 60%, transparent 80%);
+  animation: pulseAura 4s infinite ease-in-out;
+}
+
+@keyframes pulseAura {
+  0%, 100% { transform: scale(0.96); opacity: 0.7; }
+  50% { transform: scale(1.06); opacity: 1; }
+}
+
+.breathing-svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  transform: rotate(-90deg);
+}
+
+.ring-track {
+  fill: none;
+  stroke: rgba(13, 148, 136, 0.15);
+  stroke-width: 8;
+}
+
+[data-theme="dark"] .ring-track {
+  stroke: rgba(20, 184, 166, 0.2);
+}
+
+.ring-indicator {
+  fill: none;
+  stroke: #10b981;
+  stroke-width: 8;
+  stroke-linecap: round;
+  transition: stroke 0.35s ease, filter 0.35s ease;
+}
+
+.ring-completed-glow {
+  fill: none;
+  stroke: var(--emerald);
+  stroke-width: 8;
+  filter: drop-shadow(0 0 8px rgba(16, 185, 129, 0.6));
+}
+
+.ring-inner-box {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 20px;
+}
+
+.ring-icon-box {
+  font-size: 26px;
+  line-height: 1;
+  margin-bottom: 6px;
+}
+
+.ring-step-pill {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--primary);
+  background: var(--primary-light);
+  border: 1px solid var(--primary-border);
+  padding: 2px 10px;
+  border-radius: var(--radius-pill);
+  margin-bottom: 6px;
+}
+
+.ring-timer-digits {
+  font-size: 42px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  color: var(--text-main);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.1;
+  margin-bottom: 6px;
+}
+
+.ring-instruction {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-muted);
+  max-width: 170px;
+  line-height: 1.4;
+}
+
+/* 进度小节点 */
+.step-progress-dots {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-top: 24px;
+}
+
+.progress-dot {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-muted);
+}
+
+.dot-num {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 700;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  transition: all 0.2s ease;
+}
+
+.progress-dot.active .dot-num {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: #ffffff;
+  box-shadow: 0 0 10px rgba(13, 148, 136, 0.4);
+}
+
+.progress-dot.done .dot-num {
+  background: var(--emerald-light);
+  border-color: var(--emerald);
+  color: var(--emerald);
+}
+
+.progress-dot.active {
+  color: var(--primary);
+  font-weight: 600;
+}
+
+.progress-dot.done {
+  color: var(--text-main);
+}
+
+.stage-sub-hint {
+  margin-top: 14px;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.stage-sub-hint kbd {
+  display: inline-block;
+  padding: 2px 6px;
+  font-size: 11px;
+  font-family: inherit;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+}
+
+/* ================= 底部 Bento 双栏 ================= */
+.home-bento-grid {
+  display: grid;
+  grid-template-columns: 1.15fr 0.85fr;
+  gap: 24px;
+  align-items: stretch;
+}
+
+.bento-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 22px 24px;
+  box-shadow: var(--shadow-card);
+  display: flex;
+  flex-direction: column;
+}
+
+.bento-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 18px;
+}
+
+.bento-title-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.bento-icon {
+  font-size: 18px;
+}
+
+.bento-title {
+  font-size: 16px;
+  font-weight: 700;
+  margin: 0;
+  color: var(--text-main);
+}
+
+.live-update-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--emerald);
+  background: var(--emerald-light);
+  padding: 2px 8px;
+  border-radius: var(--radius-pill);
+}
+
+.live-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--emerald);
+  animation: liveBlink 2s infinite ease-in-out;
+}
+
+@keyframes liveBlink {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 1; }
+}
+
+.bento-more-link {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--primary);
+  text-decoration: none;
+}
+
+.bento-more-link:hover {
+  text-decoration: underline;
+}
+
+/* 排行榜单项样式 */
+.leaderboard-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.leaderboard-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-card-subtle);
+  border: 1px solid var(--border-light);
+  transition: all 0.2s ease;
+}
+
+.leaderboard-item:hover {
+  border-color: var(--primary-border);
+  background: var(--bg-card);
+  transform: translateX(2px);
+}
+
+.leaderboard-item.is-skipped {
+  opacity: 0.5;
+  filter: grayscale(1);
+}
+
+.skipped-tag {
+  padding: 2px 8px;
+  border-radius: 9999px;
+  background: var(--bg-subtle);
+  color: var(--text-dim);
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.leaderboard-item.top-1 {
+  background: linear-gradient(90deg, rgba(254, 243, 199, 0.35) 0%, var(--bg-card-subtle) 100%);
+  border-color: rgba(245, 158, 11, 0.3);
+}
+
+.rank-medal-box {
+  width: 24px;
+  text-align: center;
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.medal-number {
+  font-size: 13px;
+  color: var(--text-dim);
+}
+
+.user-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+}
+
+.user-avatar-circle {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--primary) 0%, #065f46 100%);
+  color: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.username-text {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-main);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.self-tag {
+  font-size: 10px;
+  color: #ffffff;
+  background: var(--primary);
+  padding: 1px 4px;
+  border-radius: 3px;
+  margin-left: 4px;
+}
+
+.streak-tag {
+  font-size: 11px;
+  color: #b45309;
+  background: var(--amber-light);
+  padding: 2px 6px;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+
+.reward-points {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--primary);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.check-mark {
+  color: var(--emerald);
+  font-weight: 800;
+  font-size: 14px;
+}
+
+.empty-list-hint {
+  padding: 24px;
+  text-align: center;
+  font-size: 13px;
+  color: var(--text-dim);
+}
+
+/* 奖励卡片 */
+.deadline-pill {
+  font-size: 12px;
+  color: var(--text-muted);
+  background: var(--bg-subtle);
+  padding: 3px 8px;
+  border-radius: var(--radius-pill);
+}
+
+.rewards-tiers-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 18px;
+}
+
+.reward-tier-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  background: var(--bg-subtle);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-light);
+}
+
+.tier-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-main);
+}
+
+.crown-icon {
+  font-size: 15px;
+}
+
+.tier-amount {
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.tier-amount strong {
+  font-size: 15px;
+  font-weight: 800;
+  color: var(--primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.claim-action-panel {
+  margin-top: auto;
+  padding: 14px;
+  border-radius: var(--radius-sm);
+  background: var(--primary-light);
+  border: 1px solid var(--primary-border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.claim-info {
+  font-size: 13px;
+  color: var(--text-main);
+}
+
+.claim-info strong {
+  color: var(--primary);
+  font-weight: 700;
+}
+
+.claim-submit-btn {
+  padding: 8px 16px;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.claimed-badge {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--emerald);
+}
+
+.login-prompt-box {
+  margin-top: auto;
+  padding: 12px;
+  background: var(--bg-subtle);
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  color: var(--text-muted);
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+.card-footer-tip {
+  margin-top: 14px;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+@media (max-width: 860px) {
+  .home-bento-grid {
+    grid-template-columns: 1fr;
+  }
+}
+</style>

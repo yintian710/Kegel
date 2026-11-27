@@ -31,3 +31,11 @@ async def purchase(request: Request):
     body = await json_body(request)
     user = auth.require_user(current_user(request))
     return good(await catalog.purchase_product(user, body.get("product_id"), body.get("request_id")))
+
+
+@router.post("/orders/{order_no}/check")
+async def check_order(order_no: str, request: Request):
+    await json_body(request)
+    user = auth.require_user(current_user(request))
+    result = await catalog.check_delivery_for_user(user, order_no)
+    return good({**result, "wallet": await credits.wallet_view(user["id"])})

@@ -87,6 +87,22 @@ async def reconcile_purchase(order_no: str, request: Request):
     return good({"order": await catalog.reconcile(order_no, body.get("result"), body.get("trade_no"))})
 
 
+@router.post("/admin/purchases/check")
+async def check_all_purchases(request: Request):
+    await json_body(request)
+    _admin(request)
+    reasons: list[str] = []
+    checked = await catalog.check_all_uncertain(via="admin", reasons=reasons)
+    return good({"checked": checked, "reasons": reasons})
+
+
+@router.post("/admin/purchases/{order_no}/check")
+async def check_purchase(order_no: str, request: Request):
+    await json_body(request)
+    _admin(request)
+    return good(await catalog.check_delivery(order_no, via="admin"))
+
+
 @router.post("/trigger/open")
 async def trigger_open(request: Request):
     await json_body(request)
